@@ -1,14 +1,14 @@
 #!/usr/bin/python3
 
-import sys, keyword, importlib
+import sys, keyword, importlib, re
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import Qt, QFile, QTextStream, QRect, QRegularExpression, QEvent, QObject, QSize
+from PyQt5.QtCore import Qt, QFile, QTextStream, QRect, QRegularExpression, QEvent, QObject, QSize, QDate, QTime
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QFont, QColor, QTextCharFormat, QTextCursor, QFontMetrics
 from PyQt5.QtGui import  QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QPalette
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTextEdit, QWidget, QAction, QFileDialog, QDialog
 from PyQt5.QtWidgets import  QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QStatusBar, QScrollArea, QScrollBar, QLineEdit
-from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter
+from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter, QCheckBox
 
 class AutoIndentFilter(QObject):
     def __init__(self, editor):
@@ -233,7 +233,7 @@ class Pythonico(QMainWindow):
 
         find_action = QAction("Find", self)
         find_action.setShortcut(QKeySequence.Find)
-        # find_action.triggered.connect(self.show_find_dialog)
+        find_action.triggered.connect(self.show_find_dialog)
         find_menu.addAction(find_action)
 
         find_next_action = QAction("Find Next", self)
@@ -245,6 +245,9 @@ class Pythonico(QMainWindow):
         find_previous_action.setShortcut(QKeySequence("Ctrl+Alt+F"))
         # find_previous_action.triggered.connect(self.findPrevious)
         find_menu.addAction(find_previous_action)
+
+        # Add a separator
+        find_menu.addSeparator()
 
         go_to_line_action = QAction("Go to Line", self)
         go_to_line_action.setShortcut(QKeySequence("Ctrl+G"))
@@ -319,9 +322,67 @@ class Pythonico(QMainWindow):
         words = text.split()
         word_count = len(words)
 
+        # Get the current date
+        current_date = QDate.currentDate().toString(Qt.DefaultLocaleLongDate)
+
+        # Get the current time
+        current_time = QTime.currentTime().toString(Qt.DefaultLocaleShortDate)
+
         # Update the status bar text
-        status_text = f"Line: {block_number}/{total_lines}  Column: {column}    Words: {word_count}"
+        status_text = f" |  Line: {block_number}/{total_lines}  |  Column: {column}  |  Words: {word_count}  |  {current_date} {current_time} |"
+
+        # Update the status bar message
         self.statusBar.showMessage(status_text)
+
+    def show_find_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Find")
+        layout = QVBoxLayout(dialog)
+
+        search_input = QLineEdit(dialog)
+        layout.addWidget(search_input)
+
+        options_layout = QVBoxLayout()
+
+        find_button = QPushButton("Find", dialog)
+        find_button.clicked.connect(lambda: self.find_text(search_input.text()))
+        options_layout.addWidget(find_button)
+
+        layout.addLayout(options_layout)
+        dialog.exec_()
+
+    def find_text(self, search_text):
+        flags = re.MULTILINE
+        flags |= re.IGNORECASE
+
+        cursor = self.editor.textCursor()
+
+        start_pos = cursor.selectionEnd() if cursor.hasSelection() else cursor.position()
+        search_range = range(start_pos + 0, len(self.editor.toPlainText()))
+
+        pattern = re.compile(search_text, flags)
+
+        for pos in search_range:
+            match = pattern.search(self.editor.toPlainText(), pos)
+            if match:
+                cursor.setPosition(match.start())
+                cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
+                self.editor.setTextCursor(cursor)
+                self.editor.setFocus()
+                return
+
+        # If no match found, wrap around to the beginning and search again
+            if len(search_range) > 0:
+                for pos in range(search_range[0]):
+                    match = pattern.search(self.editor.toPlainText(), pos)
+                    if match:
+                        cursor.setPosition(match.start())
+                        cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
+                        self.editor.setTextCursor(cursor)
+                        self.editor.setFocus()
+                        return
+
+        QMessageBox.information(self, "Find", "No matches found.")
 
     def goToLine(self):
         max_lines = self.editor.document().blockCount()
