@@ -5,67 +5,10 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt, QFile, QTextStream, QRect, QRegularExpression, QEvent, QObject, QSize
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QFont, QColor, QTextCharFormat, QTextCursor, QFontMetrics
 from PyQt5.QtGui import  QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
-from PyQt5.QtGui import QStandardItemModel, QStandardItem
+from PyQt5.QtGui import QStandardItemModel, QStandardItem, QPalette
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTextEdit, QWidget, QAction, QFileDialog, QDialog
 from PyQt5.QtWidgets import  QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QStatusBar, QScrollArea, QScrollBar, QLineEdit
 from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter
-
-class CodeCompleter(QtWidgets.QCompleter):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
-        self.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
-        self.keywords = keyword.kwlist
-
-    def setModel(self, model):
-        super().setModel(model)
-        self.model().setStringList(self.keywords)
-
-    def complete(self, prefix, code):
-        # Perform completion logic here based on the provided code
-        # Return a list of suggestions
-        suggestions = []
-
-        # Example implementation:
-        if code.endswith('foo'):
-            suggestions.append('foobar')
-            suggestions.append('foobaz')
-
-        return suggestions
-
-    def _complete_attribute(self, code):
-        parts = code.split('.')
-        object_name = parts[0][1:]  # Remove the leading dot
-        attribute_prefix = parts[-1]
-
-        # Get the object based on its name
-        try:
-            object_module = importlib.import_module(object_name)
-            object_attrs = dir(object_module)
-        except (ModuleNotFoundError, ImportError):
-            return []
-
-        # Filter the attributes based on the prefix
-        matches = []
-        for attr in object_attrs:
-            if attr.startswith(attribute_prefix):
-                matches.append(attr)
-        return matches
-
-    def _complete_module(self, code):
-        module_prefix = code.split(' ')[-1]
-        module_names = []
-        for module_name in sys.modules:
-            if module_name.startswith(module_prefix):
-                module_names.append(module_name)
-        return module_names
-
-    def _complete_identifier(self, code):
-        matches = []
-        for keyword in self.keywords:
-            if keyword.startswith(code):
-                matches.append(keyword)
-        return matches
 
 class AutoIndentFilter(QObject):
     def __init__(self, editor):
@@ -160,100 +103,6 @@ class SyntaxHighlighter(QSyntaxHighlighter):
                 self.setFormat(start, length, format)
                 expression = pattern.match(text, expression.capturedEnd())
 
-class FindDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Find")
-        self.setFixedSize(300, 150)
-
-        layout = QVBoxLayout(self)
-
-        label = QLabel("Enter text to find:", self)
-        layout.addWidget(label)
-
-        self.text_edit = QLineEdit(self)
-        layout.addWidget(self.text_edit)
-
-        find_button = QPushButton("Find", self)
-        find_button.clicked.connect(self.accept)
-        layout.addWidget(find_button)
-
-    def search(self):
-        search_text = self.text_edit.text()
-        regex = QRegularExpression(search_text, QRegularExpression.CaseInsensitiveOption)
-        matches = []
-        cursor = self.text_edit.cursorPosition()
-        format_found = QTextCharFormat()
-        format_found.setBackground(QBrush(Qt.yellow))
-        while True:
-            match = regex.match(self.text_edit.text(), cursor)
-            if not match.hasMatch():
-                break
-            start_position = match.capturedStart()
-            end_position = match.capturedEnd()
-            cursor = end_position
-            self.text_edit.setSelection(start_position, end_position)
-            cursor.mergeCharFormat(format_found)
-            matches.append((start_position, end_position))
-        return matches
-
-class LineCountWidget(QWidget):
-    def __init__(self, editor):
-        super().__init__(editor)
-        self.editor = editor
-
-        # Create a syntax highlighter and set it for the editor
-        self.highlighter = SyntaxHighlighter(self.editor.document())
-
-        # Create a layout for the line count widget
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        # Create a plain text edit for line numbers
-        self.line_numbers_edit = QPlainTextEdit(self)
-        self.line_numbers_edit.setReadOnly(True)
-        self.line_numbers_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.line_numbers_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        # Adjust the width as needed
-        self.line_numbers_edit.setMaximumWidth(50)
-
-        # Set the font for line numbers
-        font = QFont("Monospace")
-        font.setPointSize(11)
-        self.line_numbers_edit.setFont(font)
-
-        # Set the background color
-        self.line_numbers_edit.setStyleSheet("QPlainTextEdit { background-color: #f0f0f0; }")
-
-        layout.addWidget(self.line_numbers_edit)
-
-        self.updateLineNumbers()
-        layout.addWidget(self.line_numbers_edit)
-
-        self.updateLineNumbers()
-
-        # Connect the signals for updating line numbers
-        self.editor.blockCountChanged.connect(self.updateLineNumbers)
-        self.editor.updateRequest.connect(self.updateLineNumbers)
-        self.editor.cursorPositionChanged.connect(self.updateLineNumbers)
-
-    def updateLineNumbers(self):
-        block_count = self.editor.blockCount()
-        if block_count > 0:
-            # Calculate the width required to display the line numbers
-            digits = len(str(block_count))
-            width = self.line_numbers_edit.fontMetrics().width('9' * digits) + 10
-
-            # Set the width of the line numbers edit
-            self.line_numbers_edit.setFixedWidth(width)
-
-            # Update the line numbers edit text
-            text = ''
-            for line in range(1, block_count + 1):
-                text += f'{line}\n'
-            self.line_numbers_edit.setPlainText(text)
-
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -272,7 +121,7 @@ class AboutDialog(QDialog):
             <h1><center>Pythonico</center></h1>
             <p>Pythonico is a Simple Text Editor for Python Language</p>
             <p>Version: 1.0</p>
-            <p>Author: Andre Machado</p>
+            <p>Author: André Machado</p>
         """
         about_label = QLabel(about_text)
         layout.addWidget(about_label)
@@ -282,9 +131,7 @@ class AboutDialog(QDialog):
 class Pythonico(QMainWindow):
     def __init__(self):
         super().__init__()
-
         self.initUI()
-        self.find_dialog = None
 
     def initUI(self):
         self.setWindowTitle("Pythonico")
@@ -298,10 +145,11 @@ class Pythonico(QMainWindow):
         # Create a plain text editor widget
         self.editor = QPlainTextEdit(self)
         self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.setCentralWidget(self.editor)
 
-        # Connect the cursorPositionChanged signal to adjust the scroll bar position
-        self.editor.cursorPositionChanged.connect(self.adjustScrollBar)
+        # Create a SyntaxHighlighter instance and associate it with the text editor's document
+        self.highlighter = SyntaxHighlighter(self.editor.document())
+
+        self.setCentralWidget(self.editor)
 
         # Set the background color to light yellow
         self.editor.setStyleSheet("background-color: rgb(253, 246, 227);")
@@ -320,47 +168,11 @@ class Pythonico(QMainWindow):
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
 
-        # Create a line count widget
-        self.line_count_widget = LineCountWidget(self.editor)
-
-        self.completer = CodeCompleter()
-
-        self.completion_popup = QtWidgets.QListView()
-        self.completion_popup.setWindowFlags(QtCore.Qt.Popup | QtCore.Qt.FramelessWindowHint)
-        self.completion_popup.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.completion_popup.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-
-        self.completion_model = QStandardItemModel(self.completion_popup)
-        self.completion_popup.setModel(self.completion_model)
-
-        self.editor.textChanged.connect(self.handle_code_completion)
-
-        # Connect the textChanged signal of the text field to handle code completion
-        self.editor.textChanged.connect(self.handle_code_completion)
-
-        # Create a scroll area widget
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-
         # Set the central widget as a container widget that holds both the line count widget and the editor
         container = QWidget(self)
         container.setLayout(QHBoxLayout())
-        container.layout().addWidget(self.line_count_widget)
         container.layout().addWidget(self.editor)
         self.setCentralWidget(container)
-
-        # Add stretch factor to make the editor fill the entire window
-        container.layout().setStretchFactor(self.line_count_widget, 0)
-        container.layout().setStretchFactor(self.editor, 1)
-
-        # Set the container widget as the widget inside the scroll area
-        scroll_area.setWidget(container)
-
-        # Set the central widget as the scroll area
-        self.setCentralWidget(scroll_area)
 
         # Create a menu bar
         menubar = self.menuBar()
@@ -421,18 +233,23 @@ class Pythonico(QMainWindow):
 
         find_action = QAction("Find", self)
         find_action.setShortcut(QKeySequence.Find)
-        find_action.triggered.connect(self.showFindDialog)
+        # find_action.triggered.connect(self.show_find_dialog)
         find_menu.addAction(find_action)
 
         find_next_action = QAction("Find Next", self)
-        find_next_action.setShortcut(QKeySequence.FindNext)
-        find_next_action.triggered.connect(self.findNext)
+        find_next_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        # find_next_action.triggered.connect(self.findNext)
         find_menu.addAction(find_next_action)
 
         find_previous_action = QAction("Find Previous", self)
-        find_previous_action.setShortcut(QKeySequence.FindPrevious)
-        find_previous_action.triggered.connect(self.findPrevious)
+        find_previous_action.setShortcut(QKeySequence("Ctrl+Alt+F"))
+        # find_previous_action.triggered.connect(self.findPrevious)
         find_menu.addAction(find_previous_action)
+
+        go_to_line_action = QAction("Go to Line", self)
+        go_to_line_action.setShortcut(QKeySequence("Ctrl+G"))
+        go_to_line_action.triggered.connect(self.goToLine)
+        find_menu.addAction(go_to_line_action)
 
         help_menu = menubar.addMenu("&Help")
 
@@ -506,141 +323,26 @@ class Pythonico(QMainWindow):
         status_text = f"Line: {block_number}/{total_lines}  Column: {column}    Words: {word_count}"
         self.statusBar.showMessage(status_text)
 
-    def handle_code_completion(self):
-        cursor = self.editor.textCursor()
-        cursor_position = cursor.position()
-
-        cursor.movePosition(QTextCursor.StartOfLine)
-        line = cursor.block().text()[:cursor_position - cursor.position()]
-
-        prefix_start = max(line.rfind(' '), line.rfind('\t')) + 1
-        prefix = line[prefix_start:]
-
-        suggestion_position = cursor_position - len(prefix)
-
-        self.completer.setCompletionPrefix(prefix)
-
-        suggestions = self.completer.complete(prefix, self.editor.toPlainText())
-
-        self.completion_model.clear()
-        for suggestion in suggestions:
-            item = QStandardItem(suggestion)
-            self.completion_model.appendRow(item)
-
-        if suggestions:
-            self.completer.setCompletionPrefix(prefix)
-            self.completion_popup.complete(QRect(
-            self.editor.viewport().mapToGlobal(self.editor.cursorRect().bottomLeft()),
-                QSize(0, 0)
-            ))
-            self.completion_popup.setCurrentRow(0)
-            self.completion_popup.popup().move(self.editor.cursorRect().bottomLeft())
-        else:
-            self.completion_popup.hide()
-
-    def handle_text_changed(self):
-        cursor = self.editor.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.Left)
-        cursor.select(QtGui.QTextCursor.WordUnderCursor)
-        current_word = cursor.selectedText()
-
-        if current_word.endswith('.'):
-            completions = self.completer.complete(current_word)
-            self.show_completions(completions)
-        else:
-                self.hide_completions()
-
-    def show_completions(self, completions):
-        self.completion_popup.clear()
-
-        for completion in completions:
-            action = self.completion_popup.addAction(completion)
-
-        if not completions:
-            return
-
-        cursor_rect = self.editor.cursorRect()
-        completion_popup_rect = self.completion_popup.geometry()
-        completion_popup_rect.moveTopRight(cursor_rect.topRight())
-        self.completion_popup.setGeometry(completion_popup_rect)
-        self.completion_popup.show()
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Tab and self.completion_popup.isVisible():
-            selected_action = self.completion_popup.activeAction()
-            if selected_action:
-                self.insert_completion(selected_action.text())
-            return
-
-        super().keyPressEvent(event)
-
-    def insert_completion(self, completion):
-        cursor = self.editor.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.StartOfWord)
-        cursor.movePosition(QtGui.QTextCursor.EndOfWord, QtGui.QTextCursor.KeepAnchor)
-        cursor.removeSelectedText()
-        cursor.insertText(completion)
-
-    def hide_completions(self):
-        self.completion_popup.hide()
-
-    def showFindDialog(self):
-        if not self.find_dialog:
-            self.find_dialog = FindDialog(self)
-
-        if self.find_dialog.exec_() == QDialog.Accepted:
-            search_text = self.find_dialog.search()
-            if search_text and search_text.strip():
-                self.findNext(search_text)
+    def goToLine(self):
+        max_lines = self.editor.document().blockCount()
+        line, ok = QInputDialog.getInt(self, "Go to Line", f"Line Number (1 - {max_lines}):", value=1, min=1, max=max_lines)
+        if ok:
+            if line > max_lines:
+                QMessageBox.warning(self, "Invalid Line Number", f"The maximum number of lines is {max_lines}.")
             else:
-                QMessageBox.warning(self, "Empty Search Text", "Please enter search text.")
-
-    def showFindDialog(self):
-        if not self.find_dialog:
-            self.find_dialog = FindDialog(self)
-
-        if self.find_dialog.exec_() == QDialog.Accepted:
-            search_text = self.find_dialog.search()
-            if search_text and search_text.strip():
-                self.findNext(search_text)
-            else:
-                QMessageBox.warning(self, "Empty Search Text", "Please enter search text.")
-
-    def findNext(self, text_to_find):
-        text_to_find = self.find_dialog.search()
-
-        if text_to_find and text_to_find.strip():
-            cursor = self.editor.textCursor()
-            cursor.movePosition(QTextCursor.End)
-            self.editor.setTextCursor(cursor)
-
-            find_cursor = self.editor.find(text_to_find)
-            if find_cursor:
-                self.editor.setTextCursor(find_cursor)
-            else:
-                self.showNoMatchFoundDialog()
-        else:
-            self.showEmptySearchTextDialog()
-
-    def findPrevious(self, text_to_find):
-        text_to_find = self.find_dialog.search()
-
-        if text_to_find and text_to_find.strip():
-            cursor = self.editor.textCursor()
-            found = self.editor.find(text_to_find, QTextDocument.FindBackward)
-
-            if found:
+                cursor = self.editor.textCursor()
+                cursor.setPosition(self.editor.document().findBlockByLineNumber(line - 1).position())
                 self.editor.setTextCursor(cursor)
-            else:
-                self.showNoMatchFoundDialog()
         else:
-            self.showEmptySearchTextDialog()
+            self.showMessageBox("Go to Line canceled.")
 
-    def showNoMatchFoundDialog(self):
-        QMessageBox.information(self, "No Match Found", "No matches found for the search text.")
-
-    def showEmptySearchTextDialog(self):
-        QMessageBox.warning(self, "Empty Search Text", "Please enter search text.")
+    def showMessageBox(self, message):
+        msg_box = QMessageBox(self)
+        msg_box.setText(message)
+        msg_box.setWindowTitle("Go to Line")
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.addButton(QMessageBox.Ok)
+        msg_box.exec_()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
