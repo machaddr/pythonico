@@ -65,13 +65,7 @@ class SyntaxHighlighter(QSyntaxHighlighter):
         keyword_format.setForeground(QColor("#0000FF"))  # Blue color for keywords
         keyword_format.setFontWeight(QFont.Bold)
 
-        keywords = [
-            "False", "None", "True", "and", "as", "assert", "async", "await",
-            "break", "class", "continue", "def", "del", "elif", "else", "except",
-            "finally", "for", "from", "global", "if", "import", "in", "is", "lambda",
-            "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with",
-            "yield"
-        ]
+        keywords = keyword.kwlist
         self.add_keywords(keywords, keyword_format)
 
         # String format
@@ -132,6 +126,8 @@ class Pythonico(QMainWindow):
     def __init__(self):
         super().__init__()
         self.initUI()
+        # Add the current_file attribute and initialize it as None
+        self.current_file = None
 
     def initUI(self):
         self.setWindowTitle("Pythonico")
@@ -189,6 +185,12 @@ class Pythonico(QMainWindow):
         save_file_action.setShortcut(QKeySequence.Save)
         save_file_action.triggered.connect(self.save_file)  # Changed the method name to save_file
         file_menu.addAction(save_file_action)
+
+        # Create the "Save As" action
+        save_as_action = QAction("Save As", self)
+        save_as_action.setShortcut(QKeySequence.SaveAs)
+        save_as_action.triggered.connect(self.save_as_file)
+        file_menu.addAction(save_as_action)
 
         exit_action = QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -263,10 +265,13 @@ class Pythonico(QMainWindow):
         # Create a status bar
         self.statusBar = QStatusBar(self)
         self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready")
+        self.statusBar.showMessage("  Ready")
 
         # Connect the textChanged signal of the editor to a slot
         self.editor.textChanged.connect(self.updateStatusBar)
+
+        # Connect the onTextChanged slot to the textChanged signal of the editor
+        self.editor.textChanged.connect(self.onTextChanged)
 
         self.show()
 
@@ -283,14 +288,44 @@ class Pythonico(QMainWindow):
                 file.close()
                 self.editor.setPlainText(text)
 
+                # Update current_file attribute
+                self.current_file = file_path
+                # Update window title
+                self.setWindowTitle(f"Pythonico - {self.current_file}")
+
     def save_file(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save File")
+        if self.current_file:
+            file_path = self.current_file
+        else:
+            # No current file is set, prompt the user to choose a file to save
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save File")
+            if not file_path:
+                # User canceled the file selection, return without saving
+                return
+
+        file = QFile(file_path)
+        if file.open(QFile.WriteOnly | QFile.Text):
+            text_stream = QTextStream(file)
+            text_stream << self.editor.toPlainText()
+            file.close()
+            self.current_file = file_path
+            self.setWindowTitle(f"Pythonico - {self.current_file}")
+
+    def save_as_file(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Write File:")
         if file_path:
             file = QFile(file_path)
             if file.open(QFile.WriteOnly | QFile.Text):
                 text_stream = QTextStream(file)
                 text_stream << self.editor.toPlainText()
                 file.close()
+
+    def onTextChanged(self):
+        # Add an asterisk (*) to the window title to indicate unsaved changes
+        if self.current_file:
+            self.setWindowTitle(f"Pythonico - {self.current_file} *")
+        else:
+            self.setWindowTitle("Pythonico *")
 
     def adjustScrollBar(self):
         # Get the current cursor position
@@ -353,7 +388,6 @@ class Pythonico(QMainWindow):
 
     def find_text(self, search_text):
         flags = re.MULTILINE
-        flags |= re.IGNORECASE
 
         cursor = self.editor.textCursor()
 
@@ -369,6 +403,7 @@ class Pythonico(QMainWindow):
                 cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
                 self.editor.setTextCursor(cursor)
                 self.editor.setFocus()
+
                 return
 
         # If no match found, wrap around to the beginning and search again
@@ -382,7 +417,7 @@ class Pythonico(QMainWindow):
                         self.editor.setFocus()
                         return
 
-        QMessageBox.information(self, "Find", "No matches found.")
+            QMessageBox.information(self, "Find", "No matches found.")
 
     def goToLine(self):
         max_lines = self.editor.document().blockCount()
@@ -393,6 +428,12 @@ class Pythonico(QMainWindow):
             else:
                 cursor = self.editor.textCursor()
                 cursor.setPosition(self.editor.document().findBlockByLineNumber(line - 1).position())
+                self.editor.setTextCursor(cursor)
+
+                # Indentation adjustment
+                cursor.movePosition(QTextCursor.StartOfLine)
+                indent = len(cursor.block().text()) - len(cursor.block().text().lstrip())
+                cursor.movePosition(QTextCursor.Right, QTextCursor.MoveAnchor, indent)
                 self.editor.setTextCursor(cursor)
         else:
             self.showMessageBox("Go to Line canceled.")
