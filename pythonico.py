@@ -465,7 +465,7 @@ class Pythonico(QMainWindow):
                         self.editor.setFocus()
                         return
 
-            QMessageBox.information(self, "Find", "No matches found.")
+        QMessageBox.information(self, "Find", "No matches found.")
 
     def goToLine(self):
         max_lines = self.editor.document().blockCount()
