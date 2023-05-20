@@ -26,6 +26,20 @@ Installation
 
 ## Installation
 
+### Dependencies
+
+Before installing Pythonico, make sure you have the following dependencies installed:
+
+- [PyQt5](https://pypi.org/project/PyQt5/)
+- [QTermWidget](https://pypi.org/project/QTermWidget/)
+
+You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
+
+```bash
+pip install PyQt5
+pip install QTermWidget
+```
+
 To install Pythonico Programming Text Editor, you can clone the repository from GitHub and install the required dependencies. Run the following commands:
 
 ``` bash
