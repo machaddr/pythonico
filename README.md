@@ -62,7 +62,8 @@ This library is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2. See [LICENSE](LICENSE) for details.
 
 ## Author
-Pythonico Programming Text Editor is developed and maintained by André Machado. You can contact me at sedzcat@gmail.com.
+Pythonico Programming Text Editor is developed and maintained by André Machado.
+You can contact me at sedzcat@gmail.com.
 
 ## Conclusion
 Pythonico Programming Text Editor aims to provide a lightweight and efficient text editor specifically designed for Python programming. We welcome your feedback, suggestions, and contributions to improve Pythonico Programming Text Editor and make it even more useful for the Python community.
