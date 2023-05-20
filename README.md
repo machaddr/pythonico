@@ -83,7 +83,7 @@ Refer to the documentation for detailed instructions and examples on how to use 
 ## Contributing
 Contributions to Pythonico Programming Text Editor are welcome! If you'd like to contribute, please follow these steps:
 
-### Fork the repository and create a new branch.
+### Fork the repository
 Make your changes and test them thoroughly.
 Submit a pull request with a clear description of your changes.
 Please ensure that your code follows the project's coding style and guidelines. Also, make sure to update the documentation and include any necessary tests for your changes.
