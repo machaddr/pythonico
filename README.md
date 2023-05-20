@@ -28,15 +28,18 @@ Installation
 
 Before installing Pythonico, make sure you have the following dependencies installed:
 
+- [Python 3.6 or above](https://www.python.org/downloads/)
 - [PyQt5](https://pypi.org/project/PyQt5/)
 - [QTermWidget](https://pypi.org/project/QTermWidget/)
+- [PyInstaller](https://pypi.org/project/PyInstaller/)
 
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
 ```bash
-pip install PyQt5
-pip install QTermWidget
+pip install PyQt5 QTermWidget PyInstaller
 ```
+
+If you prefer there's other method, use your distro to install the listed dependencies for Pythonico in your package manager without `pip`.
 
 ## Installation
 
@@ -58,9 +61,10 @@ To launch Pythonico Programming Text Editor, run the following command:
 ```
 ### Here's a brief overview of the text editor's usage:
 
-**File Menu:** Open, save, and close files.
-**Edit Menu:** Cut, copy, paste, undo, and redo operations.
-**Help Menu:** Get help and information about the text editor.
+- **File Menu:** Open, save, and close files.
+- **Edit Menu:** Cut, copy, paste, undo, and redo operations.
+- **Help Menu:** Get help and information about the text editor.
+
 Refer to the documentation for detailed instructions and examples on how to use Pythonico Programming Text Editor effectively.
 
 ## Contributing
