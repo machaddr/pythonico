@@ -43,7 +43,11 @@ If you prefer there's other method, use your distro to install the listed depend
 
 ## Installation
 
-To install Pythonico Programming Text Editor, you can clone the repository from GitHub and install the required dependencies. Run the following commands:
+To install Pythonico Programming Text Editor, you can clone the repository from GitHub and install the required dependencies. 
+
+### Compilation (Optional)
+
+Run the following commands:
 
 ``` bash
 git clone https://github.com/machaddr/Pythonico.git
@@ -53,12 +57,21 @@ cd Pythonico
 
 Pythonico Programming Text Editor requires Python 3.6 or above.
 
-## Usage
+### Usage
 To launch Pythonico Programming Text Editor, run the following command:
 
 ``` bash
 ./pythonico
 ```
+**(If you compiled Pythonico, the binary is in "dist" directory.)**
+
+Alternative method to run the Programming Text Editor:
+
+``` bash
+./pythonico.py
+```
+This method invokes the Python Interpreter and it is standalone.
+
 ### Here's a brief overview of the text editor's usage:
 
 - **File Menu:** Open, save, and close files.
