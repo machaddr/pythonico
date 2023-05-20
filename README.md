@@ -1,7 +1,7 @@
 ## Pythonico Programming Text Editor
 Pythonico Programming Text Editor is a lightweight and customizable text editor designed specifically for programming in Python.
 
-This portion of code provides a user-friendly interface and essential features to facilitate Python programming. It offers syntax highlighting, code auto-completion, code snippets, multiple tabs, and other functionalities to enhance the coding experience. The goal of Pythonico Programming Text Editor is to provide a fast and efficient text editor tailored for Python developers.
+This portion of code provides a user-friendly interface and essential features to facilitate Python programming. <br />It offers syntax highlighting, code auto-completion, code snippets, multiple tabs, and other functionalities to enhance the coding experience. <br /><br />The goal of Pythonico Programming Text Editor is to provide a fast and efficient text editor tailored for Python developers.
 
 This code is still in Alpha, many features may lack in the code.
 
