@@ -24,9 +24,7 @@ Offers automatic code formatting for consistent and clean code.
 Highlights syntax errors and warnings in the code for easy identification.
 Installation
 
-## Installation
-
-### Dependencies
+## Dependencies
 
 Before installing Pythonico, make sure you have the following dependencies installed:
 
@@ -39,6 +37,8 @@ You can install these dependencies using `pip`, the Python package installer. Op
 pip install PyQt5
 pip install QTermWidget
 ```
+
+## Installation
 
 To install Pythonico Programming Text Editor, you can clone the repository from GitHub and install the required dependencies. Run the following commands:
 
