@@ -1,14 +1,15 @@
 #!/usr/bin/python3
 
 import sys, keyword, importlib, re
+from QTermWidget import QTermWidget
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import Qt, QFile, QTextStream, QRect, QRegularExpression, QEvent, QObject, QSize, QDate, QTime
+from PyQt5.QtCore import Qt, QFile, QTextStream, QRect, QRegularExpression, QEvent, QObject, QSize, QDate, QTime, QDir
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QFont, QColor, QTextCharFormat, QTextCursor, QFontMetrics
 from PyQt5.QtGui import  QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QPalette
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTextEdit, QWidget, QAction, QFileDialog, QDialog
 from PyQt5.QtWidgets import  QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QStatusBar, QScrollArea, QScrollBar, QLineEdit
-from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter, QCheckBox
+from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter, QCheckBox, QFrame, QSplitter, QShortcut
 
 class AutoIndentFilter(QObject):
     def __init__(self, editor):
@@ -70,13 +71,13 @@ class SyntaxHighlighter(QSyntaxHighlighter):
 
         # String format
         string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#BDB76B"))  # Green color for strings
+        string_format.setForeground(QColor("#a2cc89"))  # Green color for strings
         self.add_rule(QRegularExpression(r'".*?"'), string_format)  # Double-quoted strings
         self.add_rule(QRegularExpression(r"'.*?'"), string_format)  # Single-quoted strings
 
         # Comment format
         comment_format = QTextCharFormat()
-        comment_format.setForeground(QColor("#D8BFD8"))  # Purple color for comments
+        comment_format.setForeground(QColor("#873E23"))  # Brown color for comments
         self.add_rule(QRegularExpression(r"#.*"), comment_format)  # Comments starting with #
 
     def add_keywords(self, keywords, format):
@@ -138,14 +139,33 @@ class Pythonico(QMainWindow):
         icon = QIcon("icons/main.png")
         self.setWindowIcon(icon)
 
-        # Create a plain text editor widget
+        # Create a QSplitter widget to hold the editor and terminal
+        splitter = QSplitter(Qt.Vertical)
+
+        # Create the plain text editor widget
         self.editor = QPlainTextEdit(self)
         self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        splitter.addWidget(self.editor)
+
+        # Create the QTermWidget terminal
+        self.terminal = QTermWidget()
+        self.terminal.sendText('python3\n')
+        splitter.addWidget(self.terminal)
+
+        # Enable copy-paste using keyboard shortcuts
+        copy_shortcut = QShortcut(QKeySequence.Copy, self.terminal)
+        copy_shortcut.activated.connect(self.copyText)
+
+        paste_shortcut = QShortcut(QKeySequence.Paste, self.terminal)
+        paste_shortcut.activated.connect(self.pasteText)
 
         # Create a SyntaxHighlighter instance and associate it with the text editor's document
         self.highlighter = SyntaxHighlighter(self.editor.document())
 
-        self.setCentralWidget(self.editor)
+
+        # Set the width of the editor widget within the splitter
+        splitter.setSizes([600, 300])
+        self.setCentralWidget(splitter)
 
         # Set the background color to light yellow
         self.editor.setStyleSheet("background-color: rgb(253, 246, 227);")
@@ -164,17 +184,16 @@ class Pythonico(QMainWindow):
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
 
-        # Set the central widget as a container widget that holds both the line count widget and the editor
-        container = QWidget(self)
-        container.setLayout(QHBoxLayout())
-        container.layout().addWidget(self.editor)
-        self.setCentralWidget(container)
-
         # Create a menu bar
         menubar = self.menuBar()
 
         # File menu
         file_menu = menubar.addMenu("&File")
+
+        new_file_action = QAction("New File", self)
+        new_file_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_file_action.triggered.connect(self.createNewFile)
+        file_menu.addAction(new_file_action)
 
         open_file_action = QAction("Open", self)
         open_file_action.setShortcut(QKeySequence.Open)
@@ -256,6 +275,14 @@ class Pythonico(QMainWindow):
         go_to_line_action.triggered.connect(self.goToLine)
         find_menu.addAction(go_to_line_action)
 
+        # Run menu
+        run_menu = menubar.addMenu("&Run")
+
+        run_action = QAction("Run", self)
+        run_action.setShortcut(QKeySequence("Ctrl+R"))
+        # run_action.triggered.connect(self.runProgram)
+        run_menu.addAction(run_action)
+
         help_menu = menubar.addMenu("&Help")
 
         about_action = QAction("About", self)
@@ -275,10 +302,40 @@ class Pythonico(QMainWindow):
 
         self.show()
 
+    def createNewFile(self):
+        # Create a plain text editor widget
+        editor = QPlainTextEdit(self)
+        editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+
+        # Set the background color to light yellow
+        editor.setStyleSheet("background-color: rgb(253, 246, 227);")
+
+        # Set font size and font type
+        font = QFont("Monospace")
+        font.setPointSize(11)
+        editor.setFont(font)
+
+        # Set the tab stop width to 4 characters
+        font = editor.font()
+        font_metrics = QFontMetrics(font)
+        tab_width = 4 * font_metrics.width(' ')
+        self.editor.setTabStopWidth(tab_width)
+
+        # Setup New File Window Name
+        self.setWindowTitle(f"Pythonico - New File")
+
+        # Sets an empty File
+        self.current_file = None
+        self.editor.clear()
+
     def openFile(self):
+        home_dir = QDir.homePath()
+
         file_dialog = QFileDialog(self)
         file_dialog.setAcceptMode(QFileDialog.AcceptOpen)
         file_dialog.setFileMode(QFileDialog.ExistingFile)
+        file_dialog.setDirectory(home_dir)  # Set the default directory to home screen
+
         if file_dialog.exec_():
             file_path = file_dialog.selectedFiles()[0]
             file = QFile(file_path)
@@ -327,21 +384,6 @@ class Pythonico(QMainWindow):
         else:
             self.setWindowTitle("Pythonico *")
 
-    def adjustScrollBar(self):
-        # Get the current cursor position
-        cursor = self.editor.textCursor()
-        cursor_top = self.editor.cursorRect().top()
-
-        # Get the visible area of the editor widget
-        visible_area = self.editor.viewport().rect()
-
-        # Calculate the offset to scroll the cursor into view
-        offset = cursor_top - visible_area.height() / 2
-
-        # Adjust the scroll bar position
-        vertical_scroll_bar = self.editor.verticalScrollBar()
-        vertical_scroll_bar.setValue(vertical_scroll_bar.value() + int(offset))
-
     def showAboutDialog(self):
         about_dialog = AboutDialog(self)
         about_dialog.exec_()
@@ -368,6 +410,12 @@ class Pythonico(QMainWindow):
 
         # Update the status bar message
         self.statusBar.showMessage(status_text)
+
+    def copyText(self):
+        self.terminal.copy()
+
+    def pasteText(self):
+        self.terminal.paste()
 
     def show_find_dialog(self):
         dialog = QDialog(self)
