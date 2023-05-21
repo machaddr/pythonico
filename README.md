@@ -1,4 +1,6 @@
-## Pythonico Programming Text Editor
+<div align="center">
+  <h2>Pythonico Programming Text Editor</h2>
+</div>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/machaddr/pythonico/main/icons/main.png" alt="logo">
