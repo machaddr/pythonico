@@ -1,15 +1,63 @@
 #!/usr/bin/python3
 
 import sys, keyword, importlib, re
-from QTermWidget import QTermWidget
-from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import Qt, QFile, QTextStream, QRect, QRegularExpression, QEvent, QObject, QSize, QDate, QTime, QDir
+from PyQt5.QtCore import Qt, QFile, QTextStream, QEvent, QRegularExpression, QDate, QTime, QDir, QObject
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QFont, QColor, QTextCharFormat, QTextCursor, QFontMetrics
-from PyQt5.QtGui import  QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
-from PyQt5.QtGui import QStandardItemModel, QStandardItem, QPalette
+from PyQt5.QtGui import QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
+from PyQt5.QtGui import QStandardItemModel, QStandardItem, QPalette, QKeySequence, QKeyEvent, QTextBlockFormat
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTextEdit, QWidget, QAction, QFileDialog, QDialog
-from PyQt5.QtWidgets import  QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QStatusBar, QScrollArea, QScrollBar, QLineEdit
+from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QStatusBar, QScrollArea, QScrollBar, QLineEdit
 from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter, QCheckBox, QFrame, QSplitter, QShortcut
+from QTermWidget import QTermWidget
+
+class LineCountWidget(QTextEdit):
+    def __init__(self, editor):
+        super().__init__()
+        self.editor = editor
+        self.setReadOnly(True)
+
+        font = QFont("Monospace", 11)
+        self.setFont(font)
+
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self.setStyleSheet("background-color: lightgray;")
+
+        self.editor.textChanged.connect(self.update_line_count)  # Connect textChanged signal
+
+        # Connect the valueChanged signal of the editor's vertical scroll bar
+        # to the update_line_count slot
+        self.editor.verticalScrollBar().valueChanged.connect(self.update_line_count)
+
+        self.editor.cursorPositionChanged.connect(self.update_line_count)
+
+        self.update_line_count()  # Initial update of line count
+
+    def update_line_count(self):
+        # Get the scroll bar's value and adjust the line count accordingly
+        scroll_value = self.editor.verticalScrollBar().value()
+        line_count = self.editor.blockCount()
+        lines = ""
+
+        max_line_number = scroll_value + line_count
+        max_line_number_width = len(str(max_line_number))
+        line_number_padding = max_line_number_width - 1  # Adjust the padding based on the maximum line number width
+
+        for line_number in range(scroll_value + 1, scroll_value + line_count + 1):
+            line_number_str = str(line_number).rjust(max_line_number_width)
+            lines += line_number_str + " " * line_number_padding
+            if line_number != max_line_number:
+                lines += "\n"
+
+        self.setText(lines)
+
+        # Adjust the width of the LineCountWidget based on the maximum line number width
+        line_number_width = self.fontMetrics().width("9" * max_line_number_width + " " * line_number_padding)
+        widget_width = line_number_width + 10  # Add some extra padding
+
+        self.setMinimumWidth(widget_width)
+        self.setMaximumWidth(widget_width)
 
 class AutoIndentFilter(QObject):
     def __init__(self, editor):
@@ -143,25 +191,27 @@ class Pythonico(QMainWindow):
         splitter = QSplitter(Qt.Vertical)
 
         # Create the plain text editor widget
-        self.editor = QPlainTextEdit(self)
+        editor_widget = QWidget()
+        editor_layout = QHBoxLayout(editor_widget)
+        self.editor = QPlainTextEdit()
+        self.line_count = LineCountWidget(self.editor)  # Create LineCountWidget instance
         self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        splitter.addWidget(self.editor)
+        editor_layout.addWidget(self.line_count)  # Add LineCountWidget to the editor layout
+        editor_layout.addWidget(self.editor)
+        splitter.addWidget(editor_widget)
 
         # Create the QTermWidget terminal
         self.terminal = QTermWidget()
-        self.terminal.sendText('python3\n')
+        self.terminal.setScrollBarPosition(QTermWidget.ScrollBarRight)
+        self.terminal.setColorScheme("WhiteOnBlack")
+        self.terminal.sendText("echo \"\$PROMPT = '>>> '\" > ~/.xonshrc && xonsh\n")
+        self.terminal.setKeyBindings("linux")
         splitter.addWidget(self.terminal)
 
-        # Enable copy-paste using keyboard shortcuts
-        copy_shortcut = QShortcut(QKeySequence.Copy, self.terminal)
-        copy_shortcut.activated.connect(self.copyText)
-
-        paste_shortcut = QShortcut(QKeySequence.Paste, self.terminal)
-        paste_shortcut.activated.connect(self.pasteText)
+        self.setCentralWidget(splitter)
 
         # Create a SyntaxHighlighter instance and associate it with the text editor's document
         self.highlighter = SyntaxHighlighter(self.editor.document())
-
 
         # Set the width of the editor widget within the splitter
         splitter.setSizes([600, 300])
@@ -275,6 +325,27 @@ class Pythonico(QMainWindow):
         go_to_line_action.triggered.connect(self.goToLine)
         find_menu.addAction(go_to_line_action)
 
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        terminal_action = QAction("Toggle Terminal", self)
+        terminal_action.setShortcut(QKeySequence("Ctrl+T"))
+        terminal_action.triggered.connect(self.toggleTerminal)
+        view_menu.addAction(terminal_action)
+
+        # Add a separator
+        view_menu.addSeparator()
+
+        splitHorizontalAction = QAction(QIcon(), "Split Horizontal", self)
+        splitHorizontalAction.setShortcut("Ctrl+%")
+        # splitHorizontalAction.triggered.connect(self.splitHorizontal)
+        view_menu.addAction(splitHorizontalAction)
+
+        splitVerticalAction = QAction(QIcon(), "Split Vertical", self)
+        splitVerticalAction.setShortcut("Ctrl+/")
+        # splitVerticalAction.triggered.connect(self.splitVertical)
+        view_menu.addAction(splitVerticalAction)
+
         # Run menu
         run_menu = menubar.addMenu("&Run")
 
@@ -299,6 +370,9 @@ class Pythonico(QMainWindow):
 
         # Connect the onTextChanged slot to the textChanged signal of the editor
         self.editor.textChanged.connect(self.onTextChanged)
+
+        # Connect cursorPositionChanged signal
+        self.editor.cursorPositionChanged.connect(self.updateStatusBar)
 
         self.show()
 
@@ -387,6 +461,20 @@ class Pythonico(QMainWindow):
     def showAboutDialog(self):
         about_dialog = AboutDialog(self)
         about_dialog.exec_()
+
+    def toggleTerminal(self):
+        if self.terminal.isHidden():
+            self.terminal.show()
+        else:
+            self.terminal.hide()
+
+    def splitVertical(self):
+        splitterV = QSplitter(Qt.Vertical)
+        self.splitterV.addWidget(QTextEdit(self))
+
+    def splitHorizontal(self):
+        splitterH = QSplitter(Qt.Horizontal)
+        self.splitterH.addWidget(QTextEdit(self))
 
     def updateStatusBar(self):
         cursor = self.editor.textCursor()
