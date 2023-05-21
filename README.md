@@ -55,8 +55,8 @@ To install Pythonico Programming Text Editor, you can clone the repository from 
 Run the following commands:
 
 ``` bash
-git clone https://github.com/machaddr/Pythonico.git
-cd Pythonico
+git clone https://github.com/machaddr/pythonico.git
+cd pythonico
 ./build.sh
 ```
 
