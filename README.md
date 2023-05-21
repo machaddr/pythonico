@@ -1,5 +1,9 @@
 ## Pythonico Programming Text Editor
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/machaddr/pythonico/main/icons/main.png" alt="logo">
+</p>
+
 ![Pythonico Programming Text Editor](https://raw.githubusercontent.com/machaddr/pythonico/main/screenshots/editor.png)
 
 Pythonico Programming Text Editor is a lightweight and customizable text editor designed specifically for programming in Python.
