@@ -1,6 +1,6 @@
 ## Pythonico Programming Text Editor
 
-![Pythonico Programming Text Editor](https://github.com/machaddr/Pythonico/tree/main/screenshots/editor.png?raw=true)
+![Pythonico](https://github.com/machaddr/Pythonico/screenshots/editor.png)
 
 Pythonico Programming Text Editor is a lightweight and customizable text editor designed specifically for programming in Python.
 
