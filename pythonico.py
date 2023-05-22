@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import sys, keyword, importlib, re
+import sys, keyword, importlib, re, webbrowser
 from PyQt5.QtCore import Qt, QFile, QTextStream, QEvent, QRegularExpression, QDate, QTime, QDir, QObject
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QFont, QColor, QTextCharFormat, QTextCursor, QFontMetrics
 from PyQt5.QtGui import QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
@@ -146,6 +146,65 @@ class SyntaxHighlighter(QSyntaxHighlighter):
                 self.setFormat(start, length, format)
                 expression = pattern.match(text, expression.capturedEnd())
 
+class AboutLicenseDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("License")
+
+        self.setGeometry(100, 100, 450, 300)
+        self.setMinimumSize(450, 300)
+        self.setMaximumSize(450, 300)
+
+        self.license = QTextEdit()
+        self.license.setReadOnly(True)
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.license)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        button_layout.addWidget(ok_button)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+        # Center the window on the screen
+        self.center()
+
+        # Set the license text in the QTextEdit
+        self.license.setPlainText("""
+        Copyright (c) 2023 André Machado
+
+        This program is free software; you can redistribute it and/or modify
+        it under the terms of the GNU General Public License version 2
+        as published by the Free Software Foundation.
+
+        This program is distributed in the hope that it will be useful,
+        but WITHOUT ANY WARRANTY; without even the implied warranty of
+        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+        GNU General Public License for more details.
+
+        You should have received a copy of the GNU General Public License
+        along with this program; if not, write to the Free Software
+        Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+        MA 02110-1301, USA.
+        """)
+
+    def center(self):
+        # Get the screen geometry
+        screen_geometry = QApplication.desktop().screenGeometry()
+        window_geometry = self.frameGeometry()
+
+        # Calculate the center position
+        x = screen_geometry.width() // 2 - window_geometry.width() // 2
+        y = screen_geometry.height() // 2 - window_geometry.height() // 2
+
+        # Move the window to the center position
+        self.move(x, y)
+
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,6 +212,9 @@ class AboutDialog(QDialog):
         self.setWindowTitle("About Pythonico")
 
         layout = QVBoxLayout()
+
+        # Set the maximum size to the current size
+        self.setMaximumSize(self.size())
 
         image_label = QLabel()
         pixmap = QPixmap("icons/main.png").scaledToWidth(200)
@@ -163,6 +225,7 @@ class AboutDialog(QDialog):
         about_text = """
             <h1><center>Pythonico</center></h1>
             <p>Pythonico is a Simple Text Editor for Python Language</p>
+            <p>License: GNU GENERAL PUBLIC LICENSE Version 2</p>
             <p>Version: 1.0</p>
             <p>Author: André Machado</p>
         """
@@ -351,10 +414,21 @@ class Pythonico(QMainWindow):
 
         run_action = QAction("Run", self)
         run_action.setShortcut(QKeySequence("Ctrl+R"))
-        # run_action.triggered.connect(self.runProgram)
+        run_action.triggered.connect(self.runProgram)
         run_menu.addAction(run_action)
 
         help_menu = menubar.addMenu("&Help")
+
+        website_action = QAction("Website", self)
+        website_action.triggered.connect(self.showWebsiteDialog)
+        help_menu.addAction(website_action)
+
+        # Add a separator
+        help_menu.addSeparator()
+
+        license_action = QAction("License", self)
+        license_action.triggered.connect(self.showLicenseDialog)
+        help_menu.addAction(license_action)
 
         about_action = QAction("About", self)
         about_action.triggered.connect(self.showAboutDialog)
@@ -458,6 +532,13 @@ class Pythonico(QMainWindow):
         else:
             self.setWindowTitle("Pythonico *")
 
+    def showWebsiteDialog(self):
+        webbrowser.open("https://github.com/machaddr/pythonico")
+
+    def showLicenseDialog(self):
+        show_license = AboutLicenseDialog()
+        show_license.exec_()
+
     def showAboutDialog(self):
         about_dialog = AboutDialog(self)
         about_dialog.exec_()
@@ -504,6 +585,14 @@ class Pythonico(QMainWindow):
 
     def pasteText(self):
         self.terminal.paste()
+
+    def runProgram(self):
+        content = self.editor.toPlainText()
+        if not content:
+            QMessageBox.warning(self,
+                "Current Text Stream is Empty", "The Editor is Empty. Please Type Some Python Code!")
+        else:
+            self.terminal.sendText(content)
 
     def show_find_dialog(self):
         dialog = QDialog(self)
