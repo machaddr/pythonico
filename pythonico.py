@@ -1,75 +1,82 @@
 #!/usr/bin/python3
 
 import sys, keyword, importlib, re, webbrowser
-from PyQt5.QtCore import Qt, QFile, QTextStream, QEvent, QRegularExpression, QDate, QTime, QDir, QObject
-from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QFont, QColor, QTextCharFormat, QTextCursor, QFontMetrics
-from PyQt5.QtGui import QTextDocument, QTextFormat, QTextOption, QTextDocumentFragment, QSyntaxHighlighter, QBrush
-from PyQt5.QtGui import QStandardItemModel, QStandardItem, QPalette, QKeySequence, QKeyEvent, QTextBlockFormat
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTextEdit, QWidget, QAction, QFileDialog, QDialog
-from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QStatusBar, QScrollArea, QScrollBar, QLineEdit
-from PyQt5.QtWidgets import QInputDialog, QPushButton, QCompleter, QCheckBox, QFrame, QSplitter, QShortcut
+from PyQt5 import QtCore, QtGui, QtWidgets
 from QTermWidget import QTermWidget
 
-class LineCountWidget(QTextEdit):
+class LineCountWidget(QtWidgets.QTextEdit):
     def __init__(self, editor):
         super().__init__()
         self.editor = editor
         self.setReadOnly(True)
 
-        font = QFont("Monospace", 11)
+        font = QtGui.QFont("Monospace", 11)
         self.setFont(font)
 
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
         self.setStyleSheet("background-color: lightgray;")
 
-        self.editor.textChanged.connect(self.update_line_count)  # Connect textChanged signal
+        # Connect textChanged signal
+        self.editor.textChanged.connect(self.update_line_count)
 
-        # Connect the valueChanged signal of the editor's vertical scroll bar
-        # to the update_line_count slot
-        self.editor.verticalScrollBar().valueChanged.connect(self.update_line_count)
+        # Connect the valueChanged signal of the
+        # to the update_line_count slot editor's vertical scroll bar
+        self.editor.verticalScrollBar().valueChanged.connect(
+            self.update_line_count
+        )
 
         self.editor.cursorPositionChanged.connect(self.update_line_count)
 
-        self.update_line_count()  # Initial update of line count
+        # Initial update of line count
+        self.update_line_count()
 
     def update_line_count(self):
-        # Get the scroll bar's value and adjust the line count accordingly
+        # Get the scroll bar's value and
+        # adjust the line count accordingly
         scroll_value = self.editor.verticalScrollBar().value()
         line_count = self.editor.blockCount()
         lines = ""
 
         max_line_number = scroll_value + line_count
         max_line_number_width = len(str(max_line_number))
-        line_number_padding = max_line_number_width - 1  # Adjust the padding based on the maximum line number width
-
-        for line_number in range(scroll_value + 1, scroll_value + line_count + 1):
-            line_number_str = str(line_number).rjust(max_line_number_width)
+        # Adjust the padding based on the maximum line number width
+        line_number_padding = max_line_number_width - 1
+        for line_number in range(
+                scroll_value + 1, scroll_value + line_count + 1):
+            line_number_str = str(line_number).rjust(
+                max_line_number_width)
             lines += line_number_str + " " * line_number_padding
             if line_number != max_line_number:
                 lines += "\n"
 
         self.setText(lines)
 
-        # Adjust the width of the LineCountWidget based on the maximum line number width
-        line_number_width = self.fontMetrics().width("9" * max_line_number_width + " " * line_number_padding)
-        widget_width = line_number_width + 10  # Add some extra padding
+        # Adjust the width of the LineCountWidget based
+        # on the maximum line number width
+        line_number_width = self.fontMetrics().width(
+            "9" * max_line_number_width + " " * line_number_padding)
 
+        # Add some extra padding
+        widget_width = line_number_width + 10
         self.setMinimumWidth(widget_width)
         self.setMaximumWidth(widget_width)
 
-class AutoIndentFilter(QObject):
+class AutoIndentFilter(QtCore.QObject):
     def __init__(self, editor):
         super().__init__()
         self.editor = editor
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.KeyPress and obj is self.editor:
-            if event.key() == Qt.Key_Tab:
+        if event.type() == QtCore.QEvent.KeyPress and obj is self.editor:
+            if event.key() == QtCore.Qt.Key_Tab:
                 self.autoIndent()
                 return True
-            elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            elif (
+                event.key() == QtCore.Qt.Key_Return or
+                event.key() == QtCore.Qt.Key_Enter
+                ):
                 self.handleEnterKey()
                 return True
 
@@ -82,7 +89,8 @@ class AutoIndentFilter(QObject):
             cursor.insertText('\t')
         else:
             lines = selected_text.split('\n')
-            indented_lines = ['\t' + line if line.strip() else line for line in lines]
+            indented_lines = ['\t' + line if line.strip() else line
+                for line in lines]
             indented_text = '\n'.join(indented_lines)
             cursor.insertText(indented_text)
 
@@ -91,18 +99,20 @@ class AutoIndentFilter(QObject):
     def handleEnterKey(self):
         cursor = self.editor.textCursor()
         block = cursor.block()
-        previous_indentation = len(block.text()) - len(block.text().lstrip())
+        previous_indentation = len(block.text()) - len(
+            block.text().lstrip())
 
         cursor.insertText('\n' + ' ' * previous_indentation)
 
-        # Check if the current line ends with a colon, indicating a function or class declaration
+        # Check if the current line ends with a colon, indicating
+        # a function or class declaration
         current_line = block.text().strip()
         if current_line.endswith(':') and current_line != ' ':
-            cursor.insertText(' ' * 4)  # Add additional indentation for the new line
-
+            # Add additional indentation for the new line
+            cursor.insertText(' ' * 4)
         self.editor.setTextCursor(cursor)
 
-class SyntaxHighlighter(QSyntaxHighlighter):
+class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
     def __init__(self, document):
         super().__init__(document)
 
@@ -110,27 +120,43 @@ class SyntaxHighlighter(QSyntaxHighlighter):
         self.highlighting_rules = []
 
         # Keyword format
-        keyword_format = QTextCharFormat()
-        keyword_format.setForeground(QColor("#0000FF"))  # Blue color for keywords
-        keyword_format.setFontWeight(QFont.Bold)
+        keyword_format = QtGui.QTextCharFormat()
+
+        # Blue color for keywords
+        keyword_format.setForeground(QtGui.QColor("#0000FF"))
+        keyword_format.setFontWeight(QtGui.QFont.Bold)
 
         keywords = keyword.kwlist
         self.add_keywords(keywords, keyword_format)
 
         # String format
-        string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#a2cc89"))  # Green color for strings
-        self.add_rule(QRegularExpression(r'".*?"'), string_format)  # Double-quoted strings
-        self.add_rule(QRegularExpression(r"'.*?'"), string_format)  # Single-quoted strings
+        string_format = QtGui.QTextCharFormat()
+
+        # Green color for strings
+        string_format.setForeground(QtGui.QColor("#a2cc89"))
+
+        # Double-quoted strings
+        self.add_rule(QtCore.QRegularExpression(r'".*?"'),
+            string_format)
+
+        # Single-quoted strings
+        self.add_rule(QtCore.QRegularExpression(r"'.*?'"),
+            string_format)
 
         # Comment format
-        comment_format = QTextCharFormat()
-        comment_format.setForeground(QColor("#873E23"))  # Brown color for comments
-        self.add_rule(QRegularExpression(r"#.*"), comment_format)  # Comments starting with #
+        comment_format = QtGui.QTextCharFormat()
+
+        # Brown color for comments
+        comment_format.setForeground(QtGui.QColor("#873E23"))
+
+        # Comments starting with #
+        self.add_rule(QtCore.QRegularExpression(r"#.*"),
+            comment_format)
 
     def add_keywords(self, keywords, format):
         for word in keywords:
-            pattern = QRegularExpression(r"\b" + word + r"\b")
+            pattern = QtCore.QRegularExpression(
+                r"\b" + word + r"\b")
             self.add_rule(pattern, format)
 
     def add_rule(self, pattern, format):
@@ -144,9 +170,10 @@ class SyntaxHighlighter(QSyntaxHighlighter):
                 start = expression.capturedStart()
                 length = expression.capturedLength()
                 self.setFormat(start, length, format)
-                expression = pattern.match(text, expression.capturedEnd())
+                expression = pattern.match(text,
+                    expression.capturedEnd())
 
-class AboutLicenseDialog(QDialog):
+class AboutLicenseDialog(QtWidgets.QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("License")
@@ -155,16 +182,16 @@ class AboutLicenseDialog(QDialog):
         self.setMinimumSize(450, 300)
         self.setMaximumSize(450, 300)
 
-        self.license = QTextEdit()
+        self.license = QtWidgets.QTextEdit()
         self.license.setReadOnly(True)
 
-        ok_button = QPushButton("OK")
+        ok_button = QtWidgets.QPushButton("OK")
         ok_button.clicked.connect(self.accept)
 
-        layout = QVBoxLayout()
+        layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.license)
 
-        button_layout = QHBoxLayout()
+        button_layout = QtWidgets.QHBoxLayout()
         button_layout.addStretch(1)
         button_layout.addWidget(ok_button)
 
@@ -174,7 +201,7 @@ class AboutLicenseDialog(QDialog):
         # Center the window on the screen
         self.center()
 
-        # Set the license text in the QTextEdit
+        # Set the license text in the QtWidgets.QTextEdit
         self.license.setPlainText("""
         Copyright (c) 2023 André Machado
 
@@ -195,7 +222,7 @@ class AboutLicenseDialog(QDialog):
 
     def center(self):
         # Get the screen geometry
-        screen_geometry = QApplication.desktop().screenGeometry()
+        screen_geometry = QtWidgets.QApplication.desktop().screenGeometry()
         window_geometry = self.frameGeometry()
 
         # Calculate the center position
@@ -205,21 +232,21 @@ class AboutLicenseDialog(QDialog):
         # Move the window to the center position
         self.move(x, y)
 
-class AboutDialog(QDialog):
+class AboutDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.setWindowTitle("About Pythonico")
 
-        layout = QVBoxLayout()
+        layout = QtWidgets.QVBoxLayout()
 
         # Set the maximum size to the current size
         self.setMaximumSize(self.size())
 
-        image_label = QLabel()
-        pixmap = QPixmap("icons/main.png").scaledToWidth(200)
+        image_label = QtWidgets.QLabel()
+        pixmap = QtGui.QPixmap("icons/main.png").scaledToWidth(200)
         image_label.setPixmap(pixmap)
-        image_label.setAlignment(Qt.AlignCenter)
+        image_label.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(image_label)
 
         about_text = """
@@ -229,12 +256,12 @@ class AboutDialog(QDialog):
             <p>Version: 1.0</p>
             <p>Author: André Machado</p>
         """
-        about_label = QLabel(about_text)
+        about_label = QtWidgets.QLabel(about_text)
         layout.addWidget(about_label)
 
         self.setLayout(layout)
 
-class Pythonico(QMainWindow):
+class Pythonico(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.initUI()
@@ -247,33 +274,42 @@ class Pythonico(QMainWindow):
         self.setMinimumSize(640, 400)
 
         # Set the window icon
-        icon = QIcon("icons/main.png")
+        icon = QtGui.QIcon("icons/main.png")
         self.setWindowIcon(icon)
 
-        # Create a QSplitter widget to hold the editor and terminal
-        splitter = QSplitter(Qt.Vertical)
+        # Create a QtWidgets.QSplitter widget to hold
+        # the editor and terminal
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
 
         # Create the plain text editor widget
-        editor_widget = QWidget()
-        editor_layout = QHBoxLayout(editor_widget)
-        self.editor = QPlainTextEdit()
-        self.line_count = LineCountWidget(self.editor)  # Create LineCountWidget instance
-        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        editor_layout.addWidget(self.line_count)  # Add LineCountWidget to the editor layout
+        editor_widget = QtWidgets.QWidget()
+        editor_layout = QtWidgets.QHBoxLayout(editor_widget)
+        self.editor = QtWidgets.QPlainTextEdit()
+
+        # Create LineCountWidget instance
+        self.line_count = LineCountWidget(self.editor)
+        self.editor.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarAlwaysOn)
+
+        # Add LineCountWidget to the editor layout
+        editor_layout.addWidget(self.line_count)
         editor_layout.addWidget(self.editor)
         splitter.addWidget(editor_widget)
 
         # Create the QTermWidget terminal
         self.terminal = QTermWidget()
-        self.terminal.setScrollBarPosition(QTermWidget.ScrollBarRight)
+        self.terminal.setScrollBarPosition(
+            QTermWidget.ScrollBarRight)
         self.terminal.setColorScheme("WhiteOnBlack")
-        self.terminal.sendText("echo \"\$PROMPT = '>>> '\" > ~/.xonshrc && xonsh\n")
+        self.terminal.sendText(
+            "echo \"\$PROMPT = '>>> '\" > ~/.xonshrc && xonsh\n")
         self.terminal.setKeyBindings("linux")
         splitter.addWidget(self.terminal)
 
         self.setCentralWidget(splitter)
 
-        # Create a SyntaxHighlighter instance and associate it with the text editor's document
+        # Create a SyntaxHighlighter instance and associate it
+        # with the text editor's document
         self.highlighter = SyntaxHighlighter(self.editor.document())
 
         # Set the width of the editor widget within the splitter
@@ -281,16 +317,17 @@ class Pythonico(QMainWindow):
         self.setCentralWidget(splitter)
 
         # Set the background color to light yellow
-        self.editor.setStyleSheet("background-color: rgb(253, 246, 227);")
+        self.editor.setStyleSheet(
+            "background-color: rgb(253, 246, 227);")
 
         # Set font size and font type
-        font = QFont("Monospace")
+        font = QtGui.QFont("Monospace")
         font.setPointSize(11)
         self.editor.setFont(font)
 
         # Set the tab stop width to 4 characters
         font = self.editor.font()
-        font_metrics = QFontMetrics(font)
+        font_metrics = QtGui.QFontMetrics(font)
         tab_width = 4 * font_metrics.width(' ')
         self.editor.setTabStopWidth(tab_width)
 
@@ -303,28 +340,29 @@ class Pythonico(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("&File")
 
-        new_file_action = QAction("New File", self)
-        new_file_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_file_action = QtWidgets.QAction("New File", self)
+        new_file_action.setShortcut(QtGui.QKeySequence("Ctrl+N"))
         new_file_action.triggered.connect(self.createNewFile)
         file_menu.addAction(new_file_action)
 
-        open_file_action = QAction("Open", self)
-        open_file_action.setShortcut(QKeySequence.Open)
+        open_file_action = QtWidgets.QAction("Open", self)
+        open_file_action.setShortcut(QtGui.QKeySequence.Open)
         open_file_action.triggered.connect(self.openFile)
         file_menu.addAction(open_file_action)
 
-        save_file_action = QAction("Save", self)
-        save_file_action.setShortcut(QKeySequence.Save)
-        save_file_action.triggered.connect(self.save_file)  # Changed the method name to save_file
+        save_file_action = QtWidgets.QAction("Save", self)
+        save_file_action.setShortcut(QtGui.QKeySequence.Save)
+        # Changed the method name to save_file
+        save_file_action.triggered.connect(self.save_file)
         file_menu.addAction(save_file_action)
 
         # Create the "Save As" action
-        save_as_action = QAction("Save As", self)
-        save_as_action.setShortcut(QKeySequence.SaveAs)
+        save_as_action = QtWidgets.QAction("Save As", self)
+        save_as_action.setShortcut(QtGui.QKeySequence.SaveAs)
         save_as_action.triggered.connect(self.save_as_file)
         file_menu.addAction(save_as_action)
 
-        exit_action = QAction("Exit", self)
+        exit_action = QtWidgets.QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -332,79 +370,81 @@ class Pythonico(QMainWindow):
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
 
-        undo_action = QAction("Undo", self)
-        undo_action.setShortcut(QKeySequence.Undo)
+        undo_action = QtWidgets.QAction("Undo", self)
+        undo_action.setShortcut(QtGui.QKeySequence.Undo)
         undo_action.triggered.connect(self.editor.undo)
         edit_menu.addAction(undo_action)
 
-        redo_action = QAction("Redo", self)
-        redo_action.setShortcut(QKeySequence.Redo)
+        redo_action = QtWidgets.QAction("Redo", self)
+        redo_action.setShortcut(QtGui.QKeySequence.Redo)
         redo_action.triggered.connect(self.editor.redo)
         edit_menu.addAction(redo_action)
 
-        cut_action = QAction("Cut", self)
-        cut_action.setShortcut(QKeySequence.Cut)
+        cut_action = QtWidgets.QAction("Cut", self)
+        cut_action.setShortcut(QtGui.QKeySequence.Cut)
         cut_action.triggered.connect(self.editor.cut)
         edit_menu.addAction(cut_action)
 
-        copy_action = QAction("Copy", self)
-        copy_action.setShortcut(QKeySequence.Copy)
+        copy_action = QtWidgets.QAction("Copy", self)
+        copy_action.setShortcut(QtGui.QKeySequence.Copy)
         copy_action.triggered.connect(self.editor.copy)
         edit_menu.addAction(copy_action)
 
-        paste_action = QAction("Paste", self)
-        paste_action.setShortcut(QKeySequence.Paste)
+        paste_action = QtWidgets.QAction("Paste", self)
+        paste_action.setShortcut(QtGui.QKeySequence.Paste)
         paste_action.triggered.connect(self.editor.paste)
         edit_menu.addAction(paste_action)
 
-        select_all_action = QAction("Select All", self)
-        select_all_action.setShortcut(QKeySequence.SelectAll)
+        select_all_action = QtWidgets.QAction("Select All", self)
+        select_all_action.setShortcut(QtGui.QKeySequence.SelectAll)
         select_all_action.triggered.connect(self.editor.selectAll)
         edit_menu.addAction(select_all_action)
 
         # Find menu
         find_menu = menubar.addMenu("&Find")
 
-        find_action = QAction("Find", self)
-        find_action.setShortcut(QKeySequence.Find)
+        find_action = QtWidgets.QAction("Find", self)
+        find_action.setShortcut(QtGui.QKeySequence.Find)
         find_action.triggered.connect(self.show_find_dialog)
         find_menu.addAction(find_action)
 
-        find_next_action = QAction("Find Next", self)
-        find_next_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        find_next_action = QtWidgets.QAction("Find Next", self)
+        find_next_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+F"))
         # find_next_action.triggered.connect(self.findNext)
         find_menu.addAction(find_next_action)
 
-        find_previous_action = QAction("Find Previous", self)
-        find_previous_action.setShortcut(QKeySequence("Ctrl+Alt+F"))
+        find_previous_action = QtWidgets.QAction("Find Previous", self)
+        find_previous_action.setShortcut(QtGui.QKeySequence("Ctrl+Alt+F"))
         # find_previous_action.triggered.connect(self.findPrevious)
         find_menu.addAction(find_previous_action)
 
         # Add a separator
         find_menu.addSeparator()
 
-        go_to_line_action = QAction("Go to Line", self)
-        go_to_line_action.setShortcut(QKeySequence("Ctrl+G"))
+        go_to_line_action = QtWidgets.QAction("Go to Line", self)
+        go_to_line_action.setShortcut(QtGui.QKeySequence("Ctrl+G"))
         go_to_line_action.triggered.connect(self.goToLine)
         find_menu.addAction(go_to_line_action)
 
         # View menu
         view_menu = menubar.addMenu("&View")
 
-        terminal_action = QAction("Toggle Terminal", self)
-        terminal_action.setShortcut(QKeySequence("Ctrl+T"))
+        terminal_action = QtWidgets.QAction("Toggle Terminal", self)
+        terminal_action.setShortcut(QtGui.QKeySequence("Ctrl+T"))
         terminal_action.triggered.connect(self.toggleTerminal)
         view_menu.addAction(terminal_action)
 
         # Add a separator
         view_menu.addSeparator()
 
-        splitHorizontalAction = QAction(QIcon(), "Split Horizontal", self)
+        splitHorizontalAction = QtWidgets.QAction(QtGui.QIcon(),
+            "Split Horizontal", self)
         splitHorizontalAction.setShortcut("Ctrl+%")
         # splitHorizontalAction.triggered.connect(self.splitHorizontal)
         view_menu.addAction(splitHorizontalAction)
 
-        splitVerticalAction = QAction(QIcon(), "Split Vertical", self)
+        splitVerticalAction = QtWidgets.QAction(QtGui.QIcon(),
+            "Split Vertical", self)
         splitVerticalAction.setShortcut("Ctrl+/")
         # splitVerticalAction.triggered.connect(self.splitVertical)
         view_menu.addAction(splitVerticalAction)
@@ -412,37 +452,38 @@ class Pythonico(QMainWindow):
         # Run menu
         run_menu = menubar.addMenu("&Run")
 
-        run_action = QAction("Run", self)
-        run_action.setShortcut(QKeySequence("Ctrl+R"))
+        run_action = QtWidgets.QAction("Run", self)
+        run_action.setShortcut(QtGui.QKeySequence("Ctrl+R"))
         run_action.triggered.connect(self.runProgram)
         run_menu.addAction(run_action)
 
         help_menu = menubar.addMenu("&Help")
 
-        website_action = QAction("Website", self)
+        website_action = QtWidgets.QAction("Website", self)
         website_action.triggered.connect(self.showWebsiteDialog)
         help_menu.addAction(website_action)
 
         # Add a separator
         help_menu.addSeparator()
 
-        license_action = QAction("License", self)
+        license_action = QtWidgets.QAction("License", self)
         license_action.triggered.connect(self.showLicenseDialog)
         help_menu.addAction(license_action)
 
-        about_action = QAction("About", self)
+        about_action = QtWidgets.QAction("About", self)
         about_action.triggered.connect(self.showAboutDialog)
         help_menu.addAction(about_action)
 
         # Create a status bar
-        self.statusBar = QStatusBar(self)
+        self.statusBar = QtWidgets.QStatusBar(self)
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("  Ready")
 
         # Connect the textChanged signal of the editor to a slot
         self.editor.textChanged.connect(self.updateStatusBar)
 
-        # Connect the onTextChanged slot to the textChanged signal of the editor
+        # Connect the onTextChanged slot to the
+        # textChanged signal of the editor
         self.editor.textChanged.connect(self.onTextChanged)
 
         # Connect cursorPositionChanged signal
@@ -452,20 +493,20 @@ class Pythonico(QMainWindow):
 
     def createNewFile(self):
         # Create a plain text editor widget
-        editor = QPlainTextEdit(self)
+        editor = QtWidgets.QPlainTextEdit(self)
         editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
         # Set the background color to light yellow
         editor.setStyleSheet("background-color: rgb(253, 246, 227);")
 
         # Set font size and font type
-        font = QFont("Monospace")
+        font = QtGui.QFont("Monospace")
         font.setPointSize(11)
         editor.setFont(font)
 
         # Set the tab stop width to 4 characters
         font = editor.font()
-        font_metrics = QFontMetrics(font)
+        font_metrics = QtGui.QFontMetrics(font)
         tab_width = 4 * font_metrics.width(' ')
         self.editor.setTabStopWidth(tab_width)
 
@@ -477,18 +518,20 @@ class Pythonico(QMainWindow):
         self.editor.clear()
 
     def openFile(self):
-        home_dir = QDir.homePath()
+        home_dir = QtCore.QDir.homePath()
 
-        file_dialog = QFileDialog(self)
-        file_dialog.setAcceptMode(QFileDialog.AcceptOpen)
-        file_dialog.setFileMode(QFileDialog.ExistingFile)
-        file_dialog.setDirectory(home_dir)  # Set the default directory to home screen
+        file_dialog = QtWidgets.QFileDialog(self)
+        file_dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
+        file_dialog.setFileMode(QtWidgets.QFileDialog.ExistingFile)
+
+        # Set the default directory to home screen
+        file_dialog.setDirectory(home_dir)
 
         if file_dialog.exec_():
             file_path = file_dialog.selectedFiles()[0]
-            file = QFile(file_path)
-            if file.open(QFile.ReadOnly | QFile.Text):
-                text_stream = QTextStream(file)
+            file = QtCore.QFile(file_path)
+            if file.open(QtCore.QFile.ReadOnly | QtCore.QFile.Text):
+                text_stream = QtCore.QTextStream(file)
                 text = text_stream.readAll()
                 file.close()
                 self.editor.setPlainText(text)
@@ -502,26 +545,29 @@ class Pythonico(QMainWindow):
         if self.current_file:
             file_path = self.current_file
         else:
-            # No current file is set, prompt the user to choose a file to save
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save File")
+            # No current file is set, prompt the user
+            # to choose a file to save
+            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self,
+                "Save File")
             if not file_path:
                 # User canceled the file selection, return without saving
                 return
 
-        file = QFile(file_path)
-        if file.open(QFile.WriteOnly | QFile.Text):
-            text_stream = QTextStream(file)
+        file = QtCore.QFile(file_path)
+        if file.open(QtCore.QFile.WriteOnly | QtCore.QFile.Text):
+            text_stream = QtCore.QTextStream(file)
             text_stream << self.editor.toPlainText()
             file.close()
             self.current_file = file_path
             self.setWindowTitle(f"Pythonico - {self.current_file}")
 
     def save_as_file(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Write File:")
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self,
+            "Write File:")
         if file_path:
-            file = QFile(file_path)
-            if file.open(QFile.WriteOnly | QFile.Text):
-                text_stream = QTextStream(file)
+            file = QtCore.QFile(file_path)
+            if file.open(QtCore.QFile.WriteOnly | QtCore.QFile.Text):
+                text_stream = QtCore.QTextStream(file)
                 text_stream << self.editor.toPlainText()
                 file.close()
 
@@ -550,18 +596,24 @@ class Pythonico(QMainWindow):
             self.terminal.hide()
 
     def splitVertical(self):
-        splitterV = QSplitter(Qt.Vertical)
-        self.splitterV.addWidget(QTextEdit(self))
+        splitterV = QtWidgets.QSplitter(Qt.Vertical)
+        self.splitterV.addWidget(QtWidgets.QTextEdit(self))
 
     def splitHorizontal(self):
-        splitterH = QSplitter(Qt.Horizontal)
-        self.splitterH.addWidget(QTextEdit(self))
+        splitterH = QtWidgets.QSplitter(Qt.Horizontal)
+        self.splitterH.addWidget(QtWidgets.QTextEdit(self))
 
     def updateStatusBar(self):
         cursor = self.editor.textCursor()
-        block_number = cursor.blockNumber() + 1  # Current line number
-        total_lines = self.editor.document().blockCount()  # Total line numbers
-        column = cursor.columnNumber() + 1  # Current column number
+
+        # Current line number
+        block_number = cursor.blockNumber() + 1
+
+        # Total line numbers
+        total_lines = self.editor.document().blockCount()
+
+        # Current column number
+        column = cursor.columnNumber() + 1
         text = self.editor.toPlainText()
 
         # Count the total number of words
@@ -569,13 +621,19 @@ class Pythonico(QMainWindow):
         word_count = len(words)
 
         # Get the current date
-        current_date = QDate.currentDate().toString(Qt.DefaultLocaleLongDate)
+        current_date = QtCore.QDate.currentDate() \
+            .toString(QtCore.Qt.DefaultLocaleLongDate)
 
         # Get the current time
-        current_time = QTime.currentTime().toString(Qt.DefaultLocaleShortDate)
+        current_time = QtCore.QTime.currentTime() \
+            .toString(QtCore.Qt.DefaultLocaleShortDate)
 
         # Update the status bar text
-        status_text = f" |  Line: {block_number}/{total_lines}  |  Column: {column}  |  Words: {word_count}  |  {current_date} {current_time} |"
+        status_text = (
+            f" |  Line: {block_number}/{total_lines}  "
+            f"| Column: {column}  |  Words: {word_count}  "
+            f"|  {current_date} {current_time} |"
+        )
 
         # Update the status bar message
         self.statusBar.showMessage(status_text)
@@ -589,23 +647,25 @@ class Pythonico(QMainWindow):
     def runProgram(self):
         content = self.editor.toPlainText()
         if not content:
-            QMessageBox.warning(self,
-                "Current Text Stream is Empty", "The Editor is Empty. Please Type Some Python Code!")
+            QtWidgets.QMessageBox.warning(self,
+                "Current Text Stream is Empty",
+                "The Editor is Empty. Please Type Some Python Code!")
         else:
             self.terminal.sendText(content)
 
     def show_find_dialog(self):
-        dialog = QDialog(self)
+        dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Find")
-        layout = QVBoxLayout(dialog)
+        layout = QtWidgets.QVBoxLayout(dialog)
 
-        search_input = QLineEdit(dialog)
+        search_input = QtWidgets.QLineEdit(dialog)
         layout.addWidget(search_input)
 
-        options_layout = QVBoxLayout()
+        options_layout = QtWidgets.QVBoxLayout()
 
-        find_button = QPushButton("Find", dialog)
-        find_button.clicked.connect(lambda: self.find_text(search_input.text()))
+        find_button = QtWidgets.QPushButton("Find", dialog)
+        find_button.clicked.connect(lambda: self.find_text(
+            search_input.text()))
         options_layout.addWidget(find_button)
 
         layout.addLayout(options_layout)
@@ -616,7 +676,11 @@ class Pythonico(QMainWindow):
 
         cursor = self.editor.textCursor()
 
-        start_pos = cursor.selectionEnd() if cursor.hasSelection() else cursor.position()
+        start_pos = (
+            cursor.selectionEnd()
+            if cursor.hasSelection()
+            else cursor.position()
+        )
         search_range = range(start_pos + 0, len(self.editor.toPlainText()))
 
         pattern = re.compile(search_text, flags)
@@ -625,7 +689,8 @@ class Pythonico(QMainWindow):
             match = pattern.search(self.editor.toPlainText(), pos)
             if match:
                 cursor.setPosition(match.start())
-                cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
+                cursor.setPosition(match.end(),
+                    QtGui.QTextCursor.KeepAnchor)
                 self.editor.setTextCursor(cursor)
                 self.editor.setFocus()
 
@@ -637,42 +702,52 @@ class Pythonico(QMainWindow):
                     match = pattern.search(self.editor.toPlainText(), pos)
                     if match:
                         cursor.setPosition(match.start())
-                        cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
+                        cursor.setPosition(match.end(),
+                            QtGui.QTextCursor.KeepAnchor)
                         self.editor.setTextCursor(cursor)
                         self.editor.setFocus()
                         return
 
-        QMessageBox.information(self, "Find", "No matches found.")
+        QtWidgets.QMessageBox.information(self, "Find",
+            "No matches found.")
 
     def goToLine(self):
         max_lines = self.editor.document().blockCount()
-        line, ok = QInputDialog.getInt(self, "Go to Line", f"Line Number (1 - {max_lines}):", value=1, min=1, max=max_lines)
+        line, ok = QtWidgets.QInputDialog.getInt(self, "Go to Line",
+            f"Line Number (1 - {max_lines}):", value=1, min=1,
+                max=max_lines)
         if ok:
             if line > max_lines:
-                QMessageBox.warning(self, "Invalid Line Number", f"The maximum number of lines is {max_lines}.")
+                QtWidgets.QMessageBox.warning(self,
+                    "Invalid Line Number",
+                    f"The maximum number of lines is {max_lines}.")
             else:
                 cursor = self.editor.textCursor()
-                cursor.setPosition(self.editor.document().findBlockByLineNumber(line - 1).position())
+                cursor.setPosition(
+                    self.editor.document().findBlockByLineNumber(line - 1). \
+                    position())
                 self.editor.setTextCursor(cursor)
 
                 # Indentation adjustment
-                cursor.movePosition(QTextCursor.StartOfLine)
-                indent = len(cursor.block().text()) - len(cursor.block().text().lstrip())
-                cursor.movePosition(QTextCursor.Right, QTextCursor.MoveAnchor, indent)
+                cursor.movePosition(QtGui.QTextCursor.StartOfLine)
+                indent = len(cursor.block().text()) - len(cursor.block(). \
+                    text().lstrip())
+                cursor.movePosition(QtGui.QTextCursor.Right,
+                    QtGui.QTextCursor.MoveAnchor, indent)
                 self.editor.setTextCursor(cursor)
         else:
             self.showMessageBox("Go to Line canceled.")
 
     def showMessageBox(self, message):
-        msg_box = QMessageBox(self)
+        msg_box = QtWidgets.QMessageBox(self)
         msg_box.setText(message)
         msg_box.setWindowTitle("Go to Line")
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.addButton(QMessageBox.Ok)
+        msg_box.setIcon(QtWidgets.QMessageBox.Information)
+        msg_box.addButton(QtWidgets.QMessageBox.Ok)
         msg_box.exec_()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     editor = Pythonico()
     editor.show()
     sys.exit(app.exec_())
