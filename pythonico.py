@@ -1,8 +1,43 @@
 #!/usr/bin/python3
 
 import sys, keyword, importlib, re, webbrowser
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from PyQt5 import QtCore, QtGui, QtWidgets
 from QTermWidget import QTermWidget
+
+class LanguageModelTextEdit(QtWidgets.QTextEdit):
+    def __init__(self, model, tokenizer):
+        super().__init__()
+        self.model = model
+        self.tokenizer = tokenizer
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Return or event.key() == QtCore.Qt.Key_Enter:
+            text = self.toPlainText().strip()
+            if text:
+                response = self.generate_response(text)
+                self.append('\nUser: ' + text)
+                self.append('ChatGPT: ' + response)
+                self.append('')
+                self.clear()
+        else:
+            super().keyPressEvent(event)
+
+    def generate_response(self, text):
+        inputs = self.tokenizer.encode(text, return_tensors='pt')
+        input_ids = inputs.input_ids
+        attention_mask = inputs.attention_mask
+
+        outputs = self.model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            pad_token_id=self.tokenizer.eos_token_id,
+            max_length=100,
+        )
+
+        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return response
+
 
 class LineCountWidget(QtWidgets.QTextEdit):
     def __init__(self, editor):
@@ -277,9 +312,8 @@ class Pythonico(QtWidgets.QMainWindow):
         icon = QtGui.QIcon("icons/main.png")
         self.setWindowIcon(icon)
 
-        # Create a QtWidgets.QSplitter widget to hold
-        # the editor and terminal
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        # Create a QtWidgets.QSplitter widget to hold the editor and terminals
+        main_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
 
         # Create the plain text editor widget
         editor_widget = QtWidgets.QWidget()
@@ -288,33 +322,57 @@ class Pythonico(QtWidgets.QMainWindow):
 
         # Create LineCountWidget instance
         self.line_count = LineCountWidget(self.editor)
-        self.editor.setVerticalScrollBarPolicy(
-            QtCore.Qt.ScrollBarAlwaysOn)
+        self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
 
         # Add LineCountWidget to the editor layout
         editor_layout.addWidget(self.line_count)
         editor_layout.addWidget(self.editor)
-        splitter.addWidget(editor_widget)
+        main_splitter.addWidget(editor_widget)
 
-        # Create the QTermWidget terminal
+        # Create a sub-splitter for the terminals
+        terminal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+
+        # Create the first QTermWidget terminal
         self.terminal = QTermWidget()
-        self.terminal.setScrollBarPosition(
-            QTermWidget.ScrollBarRight)
+        self.terminal.setScrollBarPosition(QTermWidget.ScrollBarRight)
         self.terminal.setColorScheme("WhiteOnBlack")
         self.terminal.sendText(
             "echo \"\$PROMPT = '>>> '\" > ~/.xonshrc && xonsh\n")
         self.terminal.setKeyBindings("linux")
-        splitter.addWidget(self.terminal)
+        terminal_splitter.addWidget(self.terminal)
 
-        self.setCentralWidget(splitter)
+        # Load the language model and tokenizer
+        model_name = 'gpt2'
+        self.model = GPT2LMHeadModel.from_pretrained(model_name)
+        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+
+        # Create the QTextEdit and QLineEdit widgets with
+        # language model integration
+        self.text_editor = LanguageModelTextEdit(self.model, self.tokenizer)
+        line_editor = QtWidgets.QLineEdit()
+
+        # Connect the returnPressed signal of the line_editor
+        # to the handle_input_entered slot
+        line_editor.returnPressed.connect(self.handle_input_entered)
+
+        # Create a QWidget to hold the text editor and line editor
+        text_widget = QtWidgets.QWidget()
+        text_layout = QtWidgets.QVBoxLayout(text_widget)
+        text_layout.addWidget(self.text_editor)
+        text_layout.addWidget(line_editor)
+
+        terminal_splitter.addWidget(text_widget)
+        main_splitter.addWidget(terminal_splitter)
+
+        self.setCentralWidget(main_splitter)
 
         # Create a SyntaxHighlighter instance and associate it
         # with the text editor's document
         self.highlighter = SyntaxHighlighter(self.editor.document())
 
         # Set the width of the editor widget within the splitter
-        splitter.setSizes([600, 300])
-        self.setCentralWidget(splitter)
+        main_splitter.setSizes([600, 300])
+        self.setCentralWidget(main_splitter)
 
         # Set the background color to light yellow
         self.editor.setStyleSheet(
@@ -602,6 +660,17 @@ class Pythonico(QtWidgets.QMainWindow):
     def splitHorizontal(self):
         splitterH = QtWidgets.QSplitter(Qt.Horizontal)
         self.splitterH.addWidget(QtWidgets.QTextEdit(self))
+
+    def handle_input_entered(self):
+        line_editor = self.sender()
+        text = line_editor.text().strip()
+
+        if text:
+            response = self.text_editor.generate_response(text)
+            self.text_editor.append('\nUser: ' + text)
+            self.text_editor.append('ChatGPT: ' + response)
+            self.text_editor.append('')
+            line_editor.clear()
 
     def updateStatusBar(self):
         cursor = self.editor.textCursor()
