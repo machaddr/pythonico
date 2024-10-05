@@ -175,8 +175,8 @@ class AboutLicenseDialog(QtWidgets.QDialog):
         self.setWindowTitle("License")
 
         self.setGeometry(100, 100, 450, 300)
-        self.setMinimumSize(450, 300)
-        self.setMaximumSize(450, 300)
+        self.setMinimumSize(500, 300)
+        self.setMaximumSize(500, 300)
 
         self.license = QtWidgets.QTextEdit()
         self.license.setReadOnly(True)
@@ -624,12 +624,10 @@ class Pythonico(QtWidgets.QMainWindow):
         word_count = len(words)
 
         # Get the current date
-        current_date = QtCore.QDate.currentDate() \
-            .toString(QtCore.Qt.DefaultLocaleLongDate)
+        current_date = QtCore.QDateTime.currentDateTime().toString("dd/MM/yyyy")
 
         # Get the current time
-        current_time = QtCore.QTime.currentTime() \
-            .toString(QtCore.Qt.DefaultLocaleShortDate)
+        current_time = QtCore.QTime.currentTime().toString("HH:mm")
 
         # Update the status bar text
         status_text = (
