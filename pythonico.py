@@ -413,12 +413,12 @@ class Pythonico(QtWidgets.QMainWindow):
 
         find_next_action = QtWidgets.QAction("Find Next", self)
         find_next_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+F"))
-        # find_next_action.triggered.connect(self.findNext)
+        find_next_action.triggered.connect(self.find_next)
         find_menu.addAction(find_next_action)
 
         find_previous_action = QtWidgets.QAction("Find Previous", self)
         find_previous_action.setShortcut(QtGui.QKeySequence("Ctrl+Alt+F"))
-        # find_previous_action.triggered.connect(self.findPrevious)
+        find_previous_action.triggered.connect(self.find_previous)
         find_menu.addAction(find_previous_action)
 
         # Add a separator
@@ -681,7 +681,7 @@ class Pythonico(QtWidgets.QMainWindow):
         layout.addLayout(options_layout)
         dialog.exec_()
 
-    def find_text(self, search_text):
+    def find_text(self, search_text, reverse=False):
         flags = re.MULTILINE
 
         cursor = self.editor.textCursor()
@@ -691,35 +691,38 @@ class Pythonico(QtWidgets.QMainWindow):
             if cursor.hasSelection()
             else cursor.position()
         )
-        search_range = range(start_pos + 0, len(self.editor.toPlainText()))
-
+        text = self.editor.toPlainText()
         pattern = re.compile(search_text, flags)
 
-        for pos in search_range:
-            match = pattern.search(self.editor.toPlainText(), pos)
-            if match:
-                cursor.setPosition(match.start())
-                cursor.setPosition(match.end(),
-                    QtGui.QTextCursor.KeepAnchor)
-                self.editor.setTextCursor(cursor)
-                self.editor.setFocus()
-
-                return
+        if reverse:
+            matches = list(pattern.finditer(text))
+            matches = [m for m in matches if m.end() <= start_pos]
+            match = matches[-1] if matches else None
+        else:
+            match = pattern.search(text, start_pos)
+        if match:
+            cursor.setPosition(match.start())
+            cursor.setPosition(match.end(), QtGui.QTextCursor.KeepAnchor)
+            self.editor.setTextCursor(cursor)
+            self.editor.setFocus()
+            return
 
         # If no match found, wrap around to the beginning and search again
-            if len(search_range) > 0:
-                for pos in range(search_range[0]):
-                    match = pattern.search(self.editor.toPlainText(), pos)
-                    if match:
-                        cursor.setPosition(match.start())
-                        cursor.setPosition(match.end(),
-                            QtGui.QTextCursor.KeepAnchor)
-                        self.editor.setTextCursor(cursor)
-                        self.editor.setFocus()
-                        return
+        match = pattern.search(text)
+        if match:
+            cursor.setPosition(match.start())
+            cursor.setPosition(match.end(), QtGui.QTextCursor.KeepAnchor)
+            self.editor.setTextCursor(cursor)
+            
+    def find_next(self):
+        search_text, ok = QtWidgets.QInputDialog.getText(self, "Find Next", "Enter text to find:")
+        if ok and search_text:
+            self.find_text(search_text)
 
-        QtWidgets.QMessageBox.information(self, "Find",
-            "No matches found.")
+    def find_previous(self):
+        search_text, ok = QtWidgets.QInputDialog.getText(self, "Find Previous", "Enter text to find:")
+        if ok and search_text:
+            self.find_text(search_text, reverse=True)
 
     def goToLine(self):
         max_lines = self.editor.document().blockCount()
