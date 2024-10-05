@@ -1,44 +1,10 @@
 #!/usr/bin/python3
 
 import sys, keyword, importlib, re, webbrowser
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from PyQt5 import QtCore, QtGui, QtWidgets
-from QTermWidget import QTermWidget
+from pyqtconsole.console import PythonConsole
 
-class LanguageModelTextEdit(QtWidgets.QTextEdit):
-    def __init__(self, model, tokenizer):
-        super().__init__()
-        self.model = model
-        self.tokenizer = tokenizer
-
-    def keyPressEvent(self, event):
-        if event.key() == QtCore.Qt.Key_Return or event.key() == QtCore.Qt.Key_Enter:
-            text = self.toPlainText().strip()
-            if text:
-                response = self.generate_response(text)
-                self.append('\nUser: ' + text)
-                self.append('ChatGPT: ' + response)
-                self.append('')
-                self.clear()
-        else:
-            super().keyPressEvent(event)
-
-    def generate_response(self, text):
-        inputs = self.tokenizer.encode(text, return_tensors='pt')
-        input_ids = inputs.input_ids
-        attention_mask = inputs.attention_mask
-
-        outputs = self.model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            pad_token_id=self.tokenizer.eos_token_id,
-            max_length=100,
-        )
-
-        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return response
-
-
+# Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
     def __init__(self, editor):
         super().__init__()
@@ -68,35 +34,30 @@ class LineCountWidget(QtWidgets.QTextEdit):
         self.update_line_count()
 
     def update_line_count(self):
-        # Get the scroll bar's value and
-        # adjust the line count accordingly
-        scroll_value = self.editor.verticalScrollBar().value()
-        line_count = self.editor.blockCount()
+        # Get the total number of lines in the editor
+        total_lines = self.editor.blockCount()
+
+        # Get the first visible block
+        first_visible_block = self.editor.firstVisibleBlock()
+        first_visible_line = first_visible_block.blockNumber()
+
+        # Get the number of visible lines
+        visible_lines = self.editor.viewport().height() // self.editor.fontMetrics().height()
+
+        # Calculate the maximum line number width
+        max_line_number_width = len(str(total_lines))
+
+        # Generate the line numbers
         lines = ""
+        for line_number in range(first_visible_line + 1, first_visible_line + visible_lines + 1):
+            if line_number <= total_lines:
+                lines += str(line_number).rjust(max_line_number_width) + "\n"
 
-        max_line_number = scroll_value + line_count
-        max_line_number_width = len(str(max_line_number))
-        # Adjust the padding based on the maximum line number width
-        line_number_padding = max_line_number_width - 1
-        for line_number in range(
-                scroll_value + 1, scroll_value + line_count + 1):
-            line_number_str = str(line_number).rjust(
-                max_line_number_width)
-            lines += line_number_str + " " * line_number_padding
-            if line_number != max_line_number:
-                lines += "\n"
+        self.setPlainText(lines)
 
-        self.setText(lines)
-
-        # Adjust the width of the LineCountWidget based
-        # on the maximum line number width
-        line_number_width = self.fontMetrics().width(
-            "9" * max_line_number_width + " " * line_number_padding)
-
-        # Add some extra padding
-        widget_width = line_number_width + 10
-        self.setMinimumWidth(widget_width)
-        self.setMaximumWidth(widget_width)
+        # Adjust the width of the LineCountWidget based on the maximum line number width
+        line_number_width = self.fontMetrics().width("9" * max_line_number_width)
+        self.setFixedWidth(line_number_width + 10)
 
 class AutoIndentFilter(QtCore.QObject):
     def __init__(self, editor):
@@ -238,7 +199,7 @@ class AboutLicenseDialog(QtWidgets.QDialog):
 
         # Set the license text in the QtWidgets.QTextEdit
         self.license.setPlainText("""
-        Copyright (c) 2023 André Machado
+        Copyright (c) 2024 André Machado
 
         This program is free software; you can redistribute it and/or modify
         it under the terms of the GNU General Public License version 2
@@ -332,36 +293,20 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create a sub-splitter for the terminals
         terminal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
 
-        # Create the first QTermWidget terminal
-        self.terminal = QTermWidget()
-        self.terminal.setScrollBarPosition(QTermWidget.ScrollBarRight)
-        self.terminal.setColorScheme("WhiteOnBlack")
-        self.terminal.sendText(
-            "echo \"\$PROMPT = '>>> '\" > ~/.xonshrc && xonsh\n")
-        self.terminal.setKeyBindings("linux")
+        # Initialize Xonsh console
+        self.terminal = PythonConsole()
+        
+        # Redirect stdout and stderr to the console
+        sys.stdout = self.terminal
+        sys.stderr = self.terminal
+        
+        # Start the console in a separate thread
+        self.terminal.eval_in_thread()
+        
+        self.terminal.show()
+
         terminal_splitter.addWidget(self.terminal)
 
-        # Load the language model and tokenizer
-        model_name = 'gpt2'
-        self.model = GPT2LMHeadModel.from_pretrained(model_name)
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-
-        # Create the QTextEdit and QLineEdit widgets with
-        # language model integration
-        self.text_editor = LanguageModelTextEdit(self.model, self.tokenizer)
-        line_editor = QtWidgets.QLineEdit()
-
-        # Connect the returnPressed signal of the line_editor
-        # to the handle_input_entered slot
-        line_editor.returnPressed.connect(self.handle_input_entered)
-
-        # Create a QWidget to hold the text editor and line editor
-        text_widget = QtWidgets.QWidget()
-        text_layout = QtWidgets.QVBoxLayout(text_widget)
-        text_layout.addWidget(self.text_editor)
-        text_layout.addWidget(line_editor)
-
-        terminal_splitter.addWidget(text_widget)
         main_splitter.addWidget(terminal_splitter)
 
         self.setCentralWidget(main_splitter)
@@ -661,17 +606,6 @@ class Pythonico(QtWidgets.QMainWindow):
         splitterH = QtWidgets.QSplitter(Qt.Horizontal)
         self.splitterH.addWidget(QtWidgets.QTextEdit(self))
 
-    def handle_input_entered(self):
-        line_editor = self.sender()
-        text = line_editor.text().strip()
-
-        if text:
-            response = self.text_editor.generate_response(text)
-            self.text_editor.append('\nUser: ' + text)
-            self.text_editor.append('ChatGPT: ' + response)
-            self.text_editor.append('')
-            line_editor.clear()
-
     def updateStatusBar(self):
         cursor = self.editor.textCursor()
 
@@ -714,14 +648,23 @@ class Pythonico(QtWidgets.QMainWindow):
         self.terminal.paste()
 
     def runProgram(self):
-        content = self.editor.toPlainText()
-        if not content:
-            QtWidgets.QMessageBox.warning(self,
-                "Current Text Stream is Empty",
-                "The Editor is Empty. Please Type Some Python Code!")
-        else:
-            self.terminal.sendText(content)
+        try:
+            content = self.editor.toPlainText()
+            if not content:
+                QtWidgets.QMessageBox.warning(self,
+                    "Current Text Stream is Empty",
+                    "The Editor is Empty. Please Type Some Python Code!")
+            else:
+                # Push the code to the local namespace
+                self.terminal.push_local_ns('code', content)
+                # Now run the code in the console
+                self.terminal.eval_in_thread()  # No parameters
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self,
+                "Unhandled Python Exception",
+                f"An error occurred: {e}")
 
+            
     def show_find_dialog(self):
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Find")
