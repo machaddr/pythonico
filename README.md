@@ -39,9 +39,7 @@ Before installing Pythonico, make sure you have the following dependencies insta
 
 - [Python 3.6 or above](https://www.python.org/downloads/)
 - [PyQt5](https://pypi.org/project/PyQt5/)
-- [QTermWidget](https://pypi.org/project/QTermWidget/)
-- [PyInstaller](https://pypi.org/project/PyInstaller/)
-- [Xonsh shell](https://xon.sh/)
+- [PyQTConsole](https://pypi.org/project/pyqtconsole/)
 
 
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
