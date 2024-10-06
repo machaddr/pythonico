@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from datasets import load_dataset
 
 class AssistantBot:
     MAX_LENGTH = 512
@@ -16,11 +17,24 @@ class AssistantBot:
         """Initialize the AssistantBot with model and tokenizer."""
         self.model_name = "gpt2"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        # Add padding token
+        self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self.dataset = self.load_and_tokenize_dataset()
+
+    def load_and_tokenize_dataset(self):
+        """Load and tokenize the dataset."""
+        dataset = load_dataset('codeparrot/codeparrot-clean', split='train')
+        tokenized_dataset = dataset.map(self.tokenize_function, batched=True)
+        return tokenized_dataset
+
+    def tokenize_function(self, examples):
+        """Tokenize the dataset examples."""
+        return self.tokenizer(examples['content'], padding='max_length', truncation=True, max_length=self.MAX_LENGTH)
 
     def handle_ai_prompt(self, input_widget, output_widget):
         """Handle AI prompt from the input widget and display the response in the output widget."""
@@ -69,14 +83,11 @@ class LineCountWidget(QtWidgets.QTextEdit):
 
         self.setStyleSheet("background-color: lightgray;")
 
-        # Connect textChanged signal
+        # Connect textChanged signal to update the line count
         self.editor.textChanged.connect(self.update_line_count)
 
-        # Connect the valueChanged signal of the
-        # to the update_line_count slot editor's vertical scroll bar
-        self.editor.verticalScrollBar().valueChanged.connect(
-            self.update_line_count
-        )
+        # Connect the editor's vertical scroll bar to the update_line_count slot
+        self.editor.verticalScrollBar().valueChanged.connect(self.update_line_count)
 
         self.editor.cursorPositionChanged.connect(self.update_line_count)
 
@@ -106,7 +117,7 @@ class LineCountWidget(QtWidgets.QTextEdit):
         self.setPlainText(lines)
 
         # Adjust the width of the LineCountWidget based on the maximum line number width
-        line_number_width = self.fontMetrics().width("9" * max_line_number_width)
+        line_number_width = self.fontMetrics().horizontalAdvance("9" * max_line_number_width)
         self.setFixedWidth(line_number_width + 10)
 
 class AutoIndentFilter(QtCore.QObject):
@@ -181,7 +192,7 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
         # String format
         string_format = QtGui.QTextCharFormat()
-        string_format.setForeground(QtGui.QColor("#98BB6C"))
+        string_format.setForeground(QtGui.QColor("brown"))
         self.add_rule(QtCore.QRegularExpression(r'".*?"'), string_format)
         self.add_rule(QtCore.QRegularExpression(r"'.*?'"), string_format)
 
@@ -341,10 +352,12 @@ class Pythonico(QtWidgets.QMainWindow):
         editor_widget = QtWidgets.QWidget()
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
         self.editor = QtWidgets.QPlainTextEdit()
+        self.editor.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
 
         # Create LineCountWidget instance
         self.line_count = LineCountWidget(self.editor)
         self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
+        self.editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
 
         # Add LineCountWidget to the editor layout
         editor_layout.addWidget(self.line_count)
