@@ -42,7 +42,7 @@ Before installing Pythonico, make sure you have the following dependencies insta
 - [PyQTConsole](https://pypi.org/project/pyqtconsole/)
 - [Transformers](https://pypi.org/project/transformers/)
 - [Torch](https://pypi.org/project/torch/)
-
+- [Datasets](https://pypi.org/project/datasets/))
 
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
