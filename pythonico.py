@@ -1,45 +1,58 @@
 #!/usr/bin/python3
 
-import sys, keyword, importlib, re, webbrowser
-import torch
+import sys, keyword, importlib, re, webbrowser, torch
+from concurrent.futures import ThreadPoolExecutor
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class AssistantBot:
+    MAX_LENGTH = 512
+    LOADING_MESSAGE = "Loading...\n"
+    ERROR_MESSAGE = "Error: {}"
+    RESPONSE_TEMPLATE = "Prompt: {}\n\nPythonico: {}\n\nEnd of Message at {}"
+
     def __init__(self):
+        """Initialize the AssistantBot with model and tokenizer."""
         self.model_name = "gpt2"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()
-        
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
     def handle_ai_prompt(self, input_widget, output_widget):
+        """Handle AI prompt from the input widget and display the response in the output widget."""
         prompt = input_widget.text()
         if not prompt:
             return
-        try:
-            # Tokenize the input prompt
-            inputs = self.tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
-            
-            # Generate response using the model
-            outputs = self.model.generate(**inputs, max_length=512)
-            
-            # Decode the generated text
-            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # Get the current date
-            current_date = QtCore.QDateTime.currentDateTime().toString("dd/MM/yyyy hh:mm:ss")
-            
-            # Add "User: " before the input prompt and "Pythonico: " and current date before the response
-            formatted_response = f"Prompt: {prompt}\n\nPythonico: {response_text}\n\nEnd of Message at {current_date}\n"
-            output_widget.append(formatted_response)
 
+        output_widget.append(self.LOADING_MESSAGE)
+        self.executor.submit(self._generate_response, prompt, input_widget, output_widget)
+
+    def _generate_response(self, prompt, input_widget, output_widget):
+        """Generate response from the AI model and update the output widget."""
+        try:
+            inputs = self.tokenizer(prompt, return_tensors="pt", max_length=self.MAX_LENGTH, truncation=True)
+            outputs = self.model.generate(**inputs, max_length=self.MAX_LENGTH)
+            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            current_date = QtCore.QDateTime.currentDateTime().toString("dd/MM/yyyy hh:mm:ss")
+            formatted_response = self.RESPONSE_TEMPLATE.format(prompt, response_text, current_date)
+            self._update_widget(output_widget, formatted_response)
         except Exception as e:
-            output_widget.append(f"Error: {str(e)}")
+            self._update_widget(output_widget, self.ERROR_MESSAGE.format(str(e)))
         finally:
-            input_widget.clear()
+            self._clear_input_widget(input_widget)
+            self._update_widget(output_widget, "")
+
+    def _update_widget(self, widget, message):
+        """Update the given widget with the provided message."""
+        QtCore.QMetaObject.invokeMethod(widget, "append", QtCore.Qt.QueuedConnection, QtCore.Q_ARG(str, message))
+
+    def _clear_input_widget(self, widget):
+        """Clear the input widget."""
+        QtCore.QMetaObject.invokeMethod(widget, "clear", QtCore.Qt.QueuedConnection)
 
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
@@ -154,42 +167,54 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
         # Keyword format
         keyword_format = QtGui.QTextCharFormat()
-
-        # Blue color for keywords
-        keyword_format.setForeground(QtGui.QColor("#0000FF"))
+        keyword_format.setForeground(QtGui.QColor("#7E9CD8"))
         keyword_format.setFontWeight(QtGui.QFont.Bold)
-
         keywords = keyword.kwlist
         self.add_keywords(keywords, keyword_format)
 
+        # Built-in functions format
+        builtin_format = QtGui.QTextCharFormat()
+        builtin_format.setForeground(QtGui.QColor("#DCA561"))
+        builtin_format.setFontWeight(QtGui.QFont.Bold)
+        builtins = dir(__builtins__)
+        self.add_keywords(builtins, builtin_format)
+
         # String format
         string_format = QtGui.QTextCharFormat()
-
-        # Green color for strings
-        string_format.setForeground(QtGui.QColor("#a2cc89"))
-
-        # Double-quoted strings
-        self.add_rule(QtCore.QRegularExpression(r'".*?"'),
-            string_format)
-
-        # Single-quoted strings
-        self.add_rule(QtCore.QRegularExpression(r"'.*?'"),
-            string_format)
+        string_format.setForeground(QtGui.QColor("#98BB6C"))
+        self.add_rule(QtCore.QRegularExpression(r'".*?"'), string_format)
+        self.add_rule(QtCore.QRegularExpression(r"'.*?'"), string_format)
 
         # Comment format
         comment_format = QtGui.QTextCharFormat()
+        comment_format.setForeground(QtGui.QColor("#717C7C"))
+        self.add_rule(QtCore.QRegularExpression(r"#.*"), comment_format)
 
-        # Brown color for comments
-        comment_format.setForeground(QtGui.QColor("#873E23"))
+        # Function definition format
+        function_format = QtGui.QTextCharFormat()
+        function_format.setForeground(QtGui.QColor("#7FB4CA"))
+        function_format.setFontWeight(QtGui.QFont.Bold)
+        self.add_rule(QtCore.QRegularExpression(r"\bdef\b\s*(\w+)"), function_format)
 
-        # Comments starting with #
-        self.add_rule(QtCore.QRegularExpression(r"#.*"),
-            comment_format)
+        # Class definition format
+        class_format = QtGui.QTextCharFormat()
+        class_format.setForeground(QtGui.QColor("#A48EC7"))
+        class_format.setFontWeight(QtGui.QFont.Bold)
+        self.add_rule(QtCore.QRegularExpression(r"\bclass\b\s*(\w+)"), class_format)
+
+        # Decorator format
+        decorator_format = QtGui.QTextCharFormat()
+        decorator_format.setForeground(QtGui.QColor("#D27E99"))
+        self.add_rule(QtCore.QRegularExpression(r"@\w+"), decorator_format)
+
+        # Numbers format
+        number_format = QtGui.QTextCharFormat()
+        number_format.setForeground(QtGui.QColor("#FF9E3B"))
+        self.add_rule(QtCore.QRegularExpression(r"\b\d+(\.\d+)?\b"), number_format)
 
     def add_keywords(self, keywords, format):
         for word in keywords:
-            pattern = QtCore.QRegularExpression(
-                r"\b" + word + r"\b")
+            pattern = QtCore.QRegularExpression(r"\b" + word + r"\b")
             self.add_rule(pattern, format)
 
     def add_rule(self, pattern, format):
@@ -198,13 +223,12 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         for pattern, format in self.highlighting_rules:
-            expression = pattern.match(text)
-            while expression.hasMatch():
-                start = expression.capturedStart()
-                length = expression.capturedLength()
+            expression = pattern.globalMatch(text)
+            while expression.hasNext():
+                match = expression.next()
+                start = match.capturedStart()
+                length = match.capturedLength()
                 self.setFormat(start, length, format)
-                expression = pattern.match(text,
-                    expression.capturedEnd())
 
 class AboutLicenseDialog(QtWidgets.QDialog):
     def __init__(self):
@@ -348,7 +372,7 @@ class Pythonico(QtWidgets.QMainWindow):
         input_layout.addWidget(self.ai_input)
         input_layout.addWidget(send_button)
         
-        self.ai_response_display.setStyleSheet("background-color: lightgrey; color: #000000; font-family: Monospace; font-size: 10pt;")
+        self.ai_response_display.setStyleSheet("background-color: #FDF6E3; color: #657B83; font-family: Monospace; font-size: 10pt;")
         
         # Add the response display and input layout to the main layout
         ai_prompt_layout.addWidget(self.ai_response_display)
@@ -394,9 +418,9 @@ class Pythonico(QtWidgets.QMainWindow):
         main_splitter.setSizes([600, 300])
         self.setCentralWidget(main_splitter)
 
-        # Set the background color to light yellow
+        # Set the background color to Tokyo Night "Day" theme
         self.editor.setStyleSheet(
-            "background-color: rgb(253, 246, 227);")
+            "background-color: #D5D6DB; color: #4C505E;")
 
         # Set font size and font type
         font = QtGui.QFont("Monospace")
