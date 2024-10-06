@@ -40,12 +40,14 @@ Before installing Pythonico, make sure you have the following dependencies insta
 - [Python 3.6 or above](https://www.python.org/downloads/)
 - [PyQt5](https://pypi.org/project/PyQt5/)
 - [PyQTConsole](https://pypi.org/project/pyqtconsole/)
+- [Transformers](https://pypi.org/project/transformers/)
+- [Torch](https://pypi.org/project/torch/)
 
 
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
 ```bash
-pip install PyQt5 pyqtconsole
+pip install PyQt5 pyqtconsole transformers torch
 ```
 
 If you prefer there's other method, use your distro to install the listed dependencies for Pythonico in your package manager without `pip`.
