@@ -1,8 +1,45 @@
 #!/usr/bin/python3
 
 import sys, keyword, importlib, re, webbrowser
+import torch
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+class AssistantBot:
+    def __init__(self):
+        self.model_name = "gpt2"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+        self.model.eval()
+        
+    def handle_ai_prompt(self, input_widget, output_widget):
+        prompt = input_widget.text()
+        if not prompt:
+            return
+        try:
+            # Tokenize the input prompt
+            inputs = self.tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
+            
+            # Generate response using the model
+            outputs = self.model.generate(**inputs, max_length=512)
+            
+            # Decode the generated text
+            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Get the current date
+            current_date = QtCore.QDateTime.currentDateTime().toString("dd/MM/yyyy hh:mm:ss")
+            
+            # Add "User: " before the input prompt and "Pythonico: " and current date before the response
+            formatted_response = f"Prompt: {prompt}\n\nPythonico: {response_text}\n\nEnd of Message at {current_date}\n"
+            output_widget.append(formatted_response)
+
+        except Exception as e:
+            output_widget.append(f"Error: {str(e)}")
+        finally:
+            input_widget.clear()
 
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
@@ -288,7 +325,45 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add LineCountWidget to the editor layout
         editor_layout.addWidget(self.line_count)
         editor_layout.addWidget(self.editor)
-        main_splitter.addWidget(editor_widget)
+
+        # Create a horizontal splitter to separate the editor and AI prompt panel
+        horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        horizontal_splitter.addWidget(editor_widget)
+
+        # Create the AI prompt panel
+        ai_prompt_panel = QtWidgets.QWidget()
+        ai_prompt_layout = QtWidgets.QVBoxLayout(ai_prompt_panel)
+        self.ai_response_display = QtWidgets.QTextEdit()
+        self.ai_response_display.setReadOnly(True)
+        
+        # Create a horizontal layout for the input and send button
+        input_layout = QtWidgets.QHBoxLayout()
+        prompt_label = QtWidgets.QLabel("Prompt:")
+        self.ai_input = QtWidgets.QLineEdit()
+        send_button = QtWidgets.QPushButton("Send")
+        send_button.clicked.connect(lambda: self.Assistant.handle_ai_prompt(self.ai_input, self.ai_response_display))
+        
+        # Add the input and send button to the horizontal layout
+        input_layout.addWidget(prompt_label)
+        input_layout.addWidget(self.ai_input)
+        input_layout.addWidget(send_button)
+        
+        self.ai_response_display.setStyleSheet("background-color: lightgrey; color: #000000; font-family: Monospace; font-size: 10pt;")
+        
+        # Add the response display and input layout to the main layout
+        ai_prompt_layout.addWidget(self.ai_response_display)
+        ai_prompt_layout.addLayout(input_layout)
+        
+        horizontal_splitter.addWidget(ai_prompt_panel)
+        
+        # Create an instance of the AssistantBot class
+        self.Assistant = AssistantBot()
+        
+        # Connect the returnPressed signal of the AI input widget
+        # to the handle_ai_prompt slot
+        self.ai_input.returnPressed.connect( lambda: self.Assistant.handle_ai_prompt( self.ai_input, self.ai_response_display ) )
+
+        main_splitter.addWidget(horizontal_splitter)
 
         # Create a sub-splitter for the terminals
         terminal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -336,7 +411,6 @@ class Pythonico(QtWidgets.QMainWindow):
 
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
-
         # Create a menu bar
         menubar = self.menuBar()
 
@@ -432,6 +506,12 @@ class Pythonico(QtWidgets.QMainWindow):
         # View menu
         view_menu = menubar.addMenu("&View")
 
+        ai_action = QtWidgets.QAction("Toggle AI Prompt", self)
+        ai_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
+        ai_action.triggered.connect(lambda: ai_prompt_panel.setVisible(
+            not ai_prompt_panel.isVisible()))
+        view_menu.addAction(ai_action)
+        
         terminal_action = QtWidgets.QAction("Toggle Terminal", self)
         terminal_action.setShortcut(QtGui.QKeySequence("Ctrl+T"))
         terminal_action.triggered.connect(self.toggleTerminal)
@@ -653,16 +733,22 @@ class Pythonico(QtWidgets.QMainWindow):
                     "Current Text Stream is Empty",
                     "The Editor is Empty. Please Type Some Python Code!")
             else:
-                # Push the code to the local namespace
-                self.terminal.push_local_ns('code', content)
-                # Now run the code in the console
-                self.terminal.eval_in_thread()  # No parameters
+                # Copy each line of the code to the console
+                for line in content.split('\n'):
+                    # Select terminal
+                    self.terminal.setFocus()
+                    
+                    # Insert the line of code
+                    self.terminal.insert_input_text(line)
+                    
+                    # Simulate pressing Enter to execute the line
+                    self.terminal.insert_input_text('\n')
+                    
         except Exception as e:
             QtWidgets.QMessageBox.critical(self,
                 "Unhandled Python Exception",
                 f"An error occurred: {e}")
-
-            
+    
     def show_find_dialog(self):
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Find")
