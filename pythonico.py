@@ -1,49 +1,68 @@
 #!/usr/bin/python3
 
-import sys, keyword, importlib, re, webbrowser, torch
+import os, sys, keyword, importlib, re, webbrowser, torch
 from concurrent.futures import ThreadPoolExecutor
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 class AssistantBot:
     MAX_LENGTH = 512
     LOADING_MESSAGE = "Loading...\n"
     ERROR_MESSAGE = "Error: {}"
     RESPONSE_TEMPLATE = "Prompt: {}\n\nPythonico: {}\n\nEnd of Message at {}"
+    DATASET_PATH = "local_dataset_path"
 
     def __init__(self):
         """Initialize the AssistantBot with model and tokenizer."""
-        self.model_name = "gpt2"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        # Add padding token
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-        self.model.eval()
-        self.executor = ThreadPoolExecutor(max_workers=2)
-        self.dataset = self.load_and_tokenize_dataset()
+        try:
+            self.model_name = "gpt2"
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            # Add padding token
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.model.to(self.device)
+            self.model.eval()
+            self.executor = ThreadPoolExecutor(max_workers=2)
+            self.dataset = self.load_and_tokenize_dataset()
+        except Exception as e:
+            print(self.ERROR_MESSAGE.format(str(e)))
 
     def load_and_tokenize_dataset(self):
         """Load and tokenize the dataset."""
-        dataset = load_dataset('codeparrot/codeparrot-clean', split='train')
-        tokenized_dataset = dataset.map(self.tokenize_function, batched=True)
-        return tokenized_dataset
+        try:
+            if os.path.exists(self.DATASET_PATH):
+                dataset = Dataset.load_from_disk(self.DATASET_PATH)
+            else:
+                dataset = load_dataset('codeparrot/codeparrot-clean', split='train')
+                dataset.save_to_disk(self.DATASET_PATH)
+            tokenized_dataset = dataset.map(self.tokenize_function, batched=True)
+            return tokenized_dataset
+        except Exception as e:
+            print(self.ERROR_MESSAGE.format(str(e)))
+            return None
 
     def tokenize_function(self, examples):
         """Tokenize the dataset examples."""
-        return self.tokenizer(examples['content'], padding='max_length', truncation=True, max_length=self.MAX_LENGTH)
+        try:
+            return self.tokenizer(examples['content'], padding='max_length', truncation=True, max_length=self.MAX_LENGTH)
+        except Exception as e:
+            print(self.ERROR_MESSAGE.format(str(e)))
+            return None
 
     def handle_ai_prompt(self, input_widget, output_widget):
         """Handle AI prompt from the input widget and display the response in the output widget."""
-        prompt = input_widget.text()
-        if not prompt:
-            return
+        try:
+            prompt = input_widget.text()
+            if not prompt:
+                return
 
-        output_widget.append(self.LOADING_MESSAGE)
-        self.executor.submit(self._generate_response, prompt, input_widget, output_widget)
+            output_widget.append(self.LOADING_MESSAGE)
+            self.executor.submit(self._generate_response, prompt, input_widget, output_widget)
+        except Exception as e:
+            self._update_widget(output_widget, self.ERROR_MESSAGE.format(str(e)))
 
     def _generate_response(self, prompt, input_widget, output_widget):
         """Generate response from the AI model and update the output widget."""
@@ -62,11 +81,17 @@ class AssistantBot:
 
     def _update_widget(self, widget, message):
         """Update the given widget with the provided message."""
-        QtCore.QMetaObject.invokeMethod(widget, "append", QtCore.Qt.QueuedConnection, QtCore.Q_ARG(str, message))
+        try:
+            QtCore.QMetaObject.invokeMethod(widget, "append", QtCore.Qt.QueuedConnection, QtCore.Q_ARG(str, message))
+        except Exception as e:
+            print(self.ERROR_MESSAGE.format(str(e)))
 
     def _clear_input_widget(self, widget):
         """Clear the input widget."""
-        QtCore.QMetaObject.invokeMethod(widget, "clear", QtCore.Qt.QueuedConnection)
+        try:
+            QtCore.QMetaObject.invokeMethod(widget, "clear", QtCore.Qt.QueuedConnection)
+        except Exception as e:
+            print(self.ERROR_MESSAGE.format(str(e)))
 
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
