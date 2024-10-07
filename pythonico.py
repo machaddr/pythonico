@@ -1,140 +1,20 @@
 #!/usr/bin/python3
 
-import os, sys, logging, keyword, importlib, re, webbrowser, torch
-from PyQt5 import QtCore, QtGui, QtWidgets
+import sys, keyword, re, webbrowser
+from PyQt5 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets
 from pyqtconsole.console import PythonConsole
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from datasets import load_dataset, Dataset
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-MAX_LENGTH = 512
-LOADING_MESSAGE = "Loading...\n"
-ERROR_MESSAGE = "Error: {}"
-RESPONSE_TEMPLATE = "Prompt: {}\n\nPythonico: {}\n\nEnd of Message at {}"
-DATASET_PATH = "local_dataset_path"
-TOKENIZED_FLAG_PATH = "tokenized_flag.txt"
-
-def tokenize_function(examples):
-    """Tokenize the dataset examples."""
-    try:
-        tokenizer = AutoTokenizer.from_pretrained("gpt2")
-        tokenizer.pad_token = tokenizer.eos_token
-        return tokenizer(examples['content'], padding='max_length', truncation=True, max_length=MAX_LENGTH)
-    except Exception as e:
-        logging.error(ERROR_MESSAGE.format(str(e)))
-        return None
-
-class AssistantBot:
-    def __init__(self):
-        """Initialize the AssistantBot with model and tokenizer."""
-        try:
-            self.model_name = "gpt2"
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            # Add padding token
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.model.to(self.device)
-            self.model.eval()
-            self.dataset = self.load_and_tokenize_dataset()
-        except Exception as e:
-            logging.error(ERROR_MESSAGE.format(str(e)))
-
-    def load_and_tokenize_dataset(self):
-        """Load and tokenize the dataset."""
-        try:
-            if (os.path.exists(DATASET_PATH)):
-                dataset = Dataset.load_from_disk(DATASET_PATH)
-                logging.info("Dataset loaded from disk.")
-                if os.path.exists(TOKENIZED_FLAG_PATH):
-                    logging.info("Dataset already tokenized.")
-                    return dataset
-                else:
-                    logging.warning("Tokenized flag not found. Please ensure the dataset is tokenized.")
-                    return None
-            else:
-                dataset = load_dataset('codeparrot/codeparrot-clean', split='train')
-                dataset.save_to_disk(DATASET_PATH)
-                logging.info("Dataset downloaded and saved to disk.")
-                tokenized_dataset = dataset.map(tokenize_function, batched=True)
-                logging.info("Dataset tokenized.")
-                with open(TOKENIZED_FLAG_PATH, 'w') as f:
-                    f.write("Tokenized")
-                return tokenized_dataset
-        except Exception as e:
-            logging.error(ERROR_MESSAGE.format(str(e)))
-            return None
-
-    def handle_ai_prompt(self, input_widget, output_widget):
-        """Handle AI prompt from the input widget and display the response in the output widget."""
-        try:
-            prompt = input_widget.text()
-            if not prompt:
-                return
-
-            output_widget.insertPlainText(LOADING_MESSAGE)
-            self._generate_response(prompt, input_widget, output_widget)
-        except Exception as e:
-            self._update_widget(output_widget, ERROR_MESSAGE.format(str(e)))
-
-    def _generate_response(self, prompt, input_widget, output_widget):
-        """Generate response from the AI model and update the output widget."""
-        try:
-            inputs = self.tokenizer(prompt, return_tensors="pt", max_length=MAX_LENGTH, truncation=True)
-            inputs = {key: value.to(self.device) for key, value in inputs.items()}
-            logging.info(f"Inputs: {inputs}")
-            
-            # Adjust generation parameters
-            outputs = self.model.generate(
-                **inputs,
-                max_length=MAX_LENGTH,
-                num_return_sequences=1,
-                no_repeat_ngram_size=2,
-                early_stopping=True
-            )
-            logging.info(f"Outputs: {outputs}")
-            
-            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # Post-process the output to remove repetitive content
-            response_text = self._post_process_response(response_text)
-            
-            current_date = QtCore.QDateTime.currentDateTime().toString("dd/MM/yyyy hh:mm:ss")
-            formatted_response = RESPONSE_TEMPLATE.format(prompt, response_text, current_date)
-            self._update_widget(output_widget, formatted_response)
-        except Exception as e:
-            self._update_widget(output_widget, ERROR_MESSAGE.format(str(e)))
-        finally:
-            self._clear_input_widget(input_widget)
-            self._update_widget(output_widget, "")
-
-    def _post_process_response(self, response_text):
-        """Post-process the response to remove repetitive content."""
-        lines = response_text.split('\n')
-        unique_lines = []
-        seen_lines = set()
-        for line in lines:
-            if line not in seen_lines:
-                unique_lines.append(line)
-                seen_lines.add(line)
-        return '\n'.join(unique_lines)
-
-    def _update_widget(self, widget, message):
-        """Update the given widget with the provided message."""
-        try:
-            widget.insertPlainText(message)
-        except Exception as e:
-            logging.error(ERROR_MESSAGE.format(str(e)))
-
-    def _clear_input_widget(self, widget):
-        """Clear the input widget."""
-        try:
-            widget.clear()
-        except Exception as e:
-            logging.error(ERROR_MESSAGE.format(str(e)))
-
+class Browser(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.browser = QtWebEngineWidgets.QWebEngineView()
+        self.layout.addWidget(self.browser)
+        self.setLayout(self.layout)
+        
+    def load_url(self, url):
+        self.browser.load(QtCore.QUrl(url))
+        
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
     def __init__(self, editor):
@@ -432,40 +312,25 @@ class Pythonico(QtWidgets.QMainWindow):
 
         # Create a horizontal splitter to separate the editor and AI prompt panel
         horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         horizontal_splitter.addWidget(editor_widget)
+        
+        # Create a widget to hold the browser
+        browser_widget = QtWidgets.QWidget()
+        browser_layout = QtWidgets.QVBoxLayout(browser_widget)
+        self.browser = Browser(self)
+        self.browser.load_url("https://www.claude.ai/login")
+        browser_layout.addWidget(self.browser)
+        browser_widget.setLayout(browser_layout)
+        
+        # Set the width of the browser widget and make it resizable
+        browser_widget.setFixedWidth(450)
+        
+        # Add the browser widget to the vertical splitter
+        vertical_splitter.addWidget(browser_widget)
 
-        # Create the AI prompt panel
-        ai_prompt_panel = QtWidgets.QWidget()
-        ai_prompt_layout = QtWidgets.QVBoxLayout(ai_prompt_panel)
-        self.ai_response_display = QtWidgets.QTextEdit()
-        self.ai_response_display.setReadOnly(True)
-        
-        # Create a horizontal layout for the input and send button
-        input_layout = QtWidgets.QHBoxLayout()
-        prompt_label = QtWidgets.QLabel("Prompt:")
-        self.ai_input = QtWidgets.QLineEdit()
-        send_button = QtWidgets.QPushButton("Send")
-        send_button.clicked.connect(lambda: self.Assistant.handle_ai_prompt(self.ai_input, self.ai_response_display))
-        
-        # Add the input and send button to the horizontal layout
-        input_layout.addWidget(prompt_label)
-        input_layout.addWidget(self.ai_input)
-        input_layout.addWidget(send_button)
-        
-        self.ai_response_display.setStyleSheet("background-color: #FDF6E3; color: #657B83; font-family: Monospace; font-size: 10pt;")
-        
-        # Add the response display and input layout to the main layout
-        ai_prompt_layout.addWidget(self.ai_response_display)
-        ai_prompt_layout.addLayout(input_layout)
-        
-        horizontal_splitter.addWidget(ai_prompt_panel)
-        
-        # Create an instance of the AssistantBot class
-        self.Assistant = AssistantBot()
-        
-        # Connect the returnPressed signal of the AI input widget
-        # to the handle_ai_prompt slot
-        self.ai_input.returnPressed.connect( lambda: self.Assistant.handle_ai_prompt( self.ai_input, self.ai_response_display ) )
+        # Add the browser widget to the horizontal splitter
+        horizontal_splitter.addWidget(browser_widget)
 
         main_splitter.addWidget(horizontal_splitter)
 
@@ -605,14 +470,15 @@ class Pythonico(QtWidgets.QMainWindow):
 
         # View menu
         view_menu = menubar.addMenu("&View")
-
-        ai_prompt_panel.setVisible(False)  # Initially hide the AI prompt panel
-
-        ai_action = QtWidgets.QAction("Toggle AI Prompt", self)
-        ai_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
-        ai_action.triggered.connect(lambda: ai_prompt_panel.setVisible(
-            not ai_prompt_panel.isVisible()))
-        view_menu.addAction(ai_action)
+        
+        # Make browser_widget visible or hidden
+        browser_widget.setVisible(False)
+        browser_action = QtWidgets.QAction("Toggle AI", self)
+        browser_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
+        browser_action.triggered.connect(lambda: browser_widget.setVisible(
+            not browser_widget.isVisible()))
+        view_menu.addAction(browser_action)
+        
         
         terminal_action = QtWidgets.QAction("Toggle Terminal", self)
         terminal_action.setShortcut(QtGui.QKeySequence("Ctrl+T"))
