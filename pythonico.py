@@ -1,7 +1,7 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import sys, keyword, re, webbrowser
-from PyQt5 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets
 from pyqtconsole.console import PythonConsole
 
 class Browser(QtWidgets.QWidget):
@@ -11,9 +11,9 @@ class Browser(QtWidgets.QWidget):
         self.browser = QtWebEngineWidgets.QWebEngineView()
         self.layout.addWidget(self.browser)
         self.setLayout(self.layout)
-        
+
     def load_url(self, url):
-        self.browser.load(QtCore.QUrl(url))
+        self.browser.setUrl(QtCore.QUrl(url))
         
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
@@ -25,8 +25,8 @@ class LineCountWidget(QtWidgets.QTextEdit):
         font = QtGui.QFont("Monospace", 11)
         self.setFont(font)
 
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.setStyleSheet("background-color: lightgray;")
 
@@ -73,13 +73,13 @@ class AutoIndentFilter(QtCore.QObject):
         self.editor = editor
 
     def eventFilter(self, obj, event):
-        if event.type() == QtCore.QEvent.KeyPress and obj is self.editor:
-            if event.key() == QtCore.Qt.Key_Tab:
+        if event.type() == QtCore.QEvent.Type.KeyPress and obj is self.editor:
+            if event.key() == QtCore.Qt.Key.Key_Tab:
                 self.autoIndent()
                 return True
             elif (
-                event.key() == QtCore.Qt.Key_Return or
-                event.key() == QtCore.Qt.Key_Enter
+                event.key() == QtCore.Qt.Key.Key_Return or
+                event.key() == QtCore.Qt.Key.Key_Enter
                 ):
                 self.handleEnterKey()
                 return True
@@ -126,14 +126,14 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         # Keyword format
         keyword_format = QtGui.QTextCharFormat()
         keyword_format.setForeground(QtGui.QColor("#7E9CD8"))
-        keyword_format.setFontWeight(QtGui.QFont.Bold)
+        keyword_format.setFontWeight(QtGui.QFont.Weight.Bold)
         keywords = keyword.kwlist
         self.add_keywords(keywords, keyword_format)
 
         # Built-in functions format
         builtin_format = QtGui.QTextCharFormat()
         builtin_format.setForeground(QtGui.QColor("#DCA561"))
-        builtin_format.setFontWeight(QtGui.QFont.Bold)
+        builtin_format.setFontWeight(QtGui.QFont.Weight.Bold)
         builtins = dir(__builtins__)
         self.add_keywords(builtins, builtin_format)
 
@@ -151,13 +151,13 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         # Function definition format
         function_format = QtGui.QTextCharFormat()
         function_format.setForeground(QtGui.QColor("#7FB4CA"))
-        function_format.setFontWeight(QtGui.QFont.Bold)
+        function_format.setFontWeight(QtGui.QFont.Weight.Bold)
         self.add_rule(QtCore.QRegularExpression(r"\bdef\b\s*(\w+)"), function_format)
 
         # Class definition format
         class_format = QtGui.QTextCharFormat()
         class_format.setForeground(QtGui.QColor("#A48EC7"))
-        class_format.setFontWeight(QtGui.QFont.Bold)
+        class_format.setFontWeight(QtGui.QFont.Weight.Bold)
         self.add_rule(QtCore.QRegularExpression(r"\bclass\b\s*(\w+)"), class_format)
 
         # Decorator format
@@ -193,9 +193,8 @@ class AboutLicenseDialog(QtWidgets.QDialog):
         super().__init__()
         self.setWindowTitle("License")
 
-        self.setGeometry(100, 100, 450, 300)
-        self.setMinimumSize(500, 300)
-        self.setMaximumSize(500, 300)
+        self.setGeometry(100, 100, 640, 480)
+        self.setMinimumSize(640, 480)
 
         self.license = QtWidgets.QTextEdit()
         self.license.setReadOnly(True)
@@ -237,7 +236,7 @@ class AboutLicenseDialog(QtWidgets.QDialog):
 
     def center(self):
         # Get the screen geometry
-        screen_geometry = QtWidgets.QApplication.desktop().screenGeometry()
+        screen_geometry = QtWidgets.QApplication.primaryScreen().geometry()
         window_geometry = self.frameGeometry()
 
         # Calculate the center position
@@ -261,7 +260,7 @@ class AboutDialog(QtWidgets.QDialog):
         image_label = QtWidgets.QLabel()
         pixmap = QtGui.QPixmap("icons/main.png").scaledToWidth(200)
         image_label.setPixmap(pixmap)
-        image_label.setAlignment(QtCore.Qt.AlignCenter)
+        image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(image_label)
 
         about_text = """
@@ -279,9 +278,9 @@ class AboutDialog(QtWidgets.QDialog):
 class Pythonico(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.initUI()
         # Add the current_file attribute and initialize it as None
         self.current_file = None
+        self.initUI()
 
     def initUI(self):
         self.setWindowTitle("Pythonico")
@@ -293,27 +292,44 @@ class Pythonico(QtWidgets.QMainWindow):
         self.setWindowIcon(icon)
 
         # Create a QtWidgets.QSplitter widget to hold the editor and terminals
-        main_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+
+        # Create the tab widget
+        self.tab_widget = QtWidgets.QTabWidget()
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab)
 
         # Create the plain text editor widget
         editor_widget = QtWidgets.QWidget()
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
         self.editor = QtWidgets.QPlainTextEdit()
-        self.editor.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        self.editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
 
         # Create LineCountWidget instance
         self.line_count = LineCountWidget(self.editor)
-        self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
-        self.editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
+        self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # Add LineCountWidget to the editor layout
         editor_layout.addWidget(self.line_count)
         editor_layout.addWidget(self.editor)
 
+        # Initialize the tab widget if not already initialized
+        if not hasattr(self, 'tab_widget'):
+            self.tab_widget = QtWidgets.QTabWidget()
+
+        # Determine the tab name
+        tab_name = "Untitled"
+        if self.current_file:
+            tab_name = QtCore.QFileInfo(self.current_file).fileName()
+
+        # Add the editor widget to a new tab
+        self.tab_widget.addTab(editor_widget, tab_name)
+
         # Create a horizontal splitter to separate the editor and AI prompt panel
-        horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        horizontal_splitter.addWidget(editor_widget)
+        horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        horizontal_splitter.addWidget(self.tab_widget)
         
         # Create a widget to hold the browser
         browser_widget = QtWidgets.QWidget()
@@ -335,7 +351,7 @@ class Pythonico(QtWidgets.QMainWindow):
         main_splitter.addWidget(horizontal_splitter)
 
         # Create a sub-splitter for the terminals
-        terminal_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        terminal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
 
         # Initialize Xonsh console
         self.terminal = PythonConsole()
@@ -371,40 +387,46 @@ class Pythonico(QtWidgets.QMainWindow):
         # Set the tab stop width to 4 characters
         font = self.editor.font()
         font_metrics = QtGui.QFontMetrics(font)
-        tab_width = 4 * font_metrics.width(' ')
+        tab_width = 4 * font_metrics.horizontalAdvance(' ')
         self.editor.setTabStopWidth(tab_width)
 
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
+        
         # Create a menu bar
         menubar = self.menuBar()
 
         # File menu
         file_menu = menubar.addMenu("&File")
 
-        new_file_action = QtWidgets.QAction("New File", self)
+        new_file_action = QtGui.QAction("New File", self)
         new_file_action.setShortcut(QtGui.QKeySequence("Ctrl+N"))
         new_file_action.triggered.connect(self.createNewFile)
         file_menu.addAction(new_file_action)
+        
+        new_tab_action = QtGui.QAction("New Tab", self)
+        new_tab_action.setShortcut(QtGui.QKeySequence("Alt+T"))
+        new_tab_action.triggered.connect(self.createNewTab)
+        file_menu.addAction(new_tab_action)
 
-        open_file_action = QtWidgets.QAction("Open", self)
-        open_file_action.setShortcut(QtGui.QKeySequence.Open)
+        open_file_action = QtGui.QAction("Open", self)
+        open_file_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_file_action.triggered.connect(self.openFile)
         file_menu.addAction(open_file_action)
 
-        save_file_action = QtWidgets.QAction("Save", self)
-        save_file_action.setShortcut(QtGui.QKeySequence.Save)
+        save_file_action = QtGui.QAction("Save", self)
+        save_file_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         # Changed the method name to save_file
         save_file_action.triggered.connect(self.save_file)
         file_menu.addAction(save_file_action)
 
         # Create the "Save As" action
-        save_as_action = QtWidgets.QAction("Save As", self)
-        save_as_action.setShortcut(QtGui.QKeySequence.SaveAs)
+        save_as_action = QtGui.QAction("Save As", self)
+        save_as_action.setShortcut(QtGui.QKeySequence.StandardKey.SaveAs)
         save_as_action.triggered.connect(self.save_as_file)
         file_menu.addAction(save_as_action)
 
-        exit_action = QtWidgets.QAction("Exit", self)
+        exit_action = QtGui.QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -412,50 +434,50 @@ class Pythonico(QtWidgets.QMainWindow):
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
 
-        undo_action = QtWidgets.QAction("Undo", self)
-        undo_action.setShortcut(QtGui.QKeySequence.Undo)
+        undo_action = QtGui.QAction("Undo", self)
+        undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
         undo_action.triggered.connect(self.editor.undo)
         edit_menu.addAction(undo_action)
 
-        redo_action = QtWidgets.QAction("Redo", self)
-        redo_action.setShortcut(QtGui.QKeySequence.Redo)
+        redo_action = QtGui.QAction("Redo", self)
+        redo_action.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
         redo_action.triggered.connect(self.editor.redo)
         edit_menu.addAction(redo_action)
 
-        cut_action = QtWidgets.QAction("Cut", self)
-        cut_action.setShortcut(QtGui.QKeySequence.Cut)
+        cut_action = QtGui.QAction("Cut", self)
+        cut_action.setShortcut(QtGui.QKeySequence.StandardKey.Cut)
         cut_action.triggered.connect(self.editor.cut)
         edit_menu.addAction(cut_action)
 
-        copy_action = QtWidgets.QAction("Copy", self)
-        copy_action.setShortcut(QtGui.QKeySequence.Copy)
+        copy_action = QtGui.QAction("Copy", self)
+        copy_action.setShortcut(QtGui.QKeySequence.StandardKey.Copy)
         copy_action.triggered.connect(self.editor.copy)
         edit_menu.addAction(copy_action)
 
-        paste_action = QtWidgets.QAction("Paste", self)
-        paste_action.setShortcut(QtGui.QKeySequence.Paste)
+        paste_action = QtGui.QAction("Paste", self)
+        paste_action.setShortcut(QtGui.QKeySequence.StandardKey.Paste)
         paste_action.triggered.connect(self.editor.paste)
         edit_menu.addAction(paste_action)
 
-        select_all_action = QtWidgets.QAction("Select All", self)
-        select_all_action.setShortcut(QtGui.QKeySequence.SelectAll)
+        select_all_action = QtGui.QAction("Select All", self)
+        select_all_action.setShortcut(QtGui.QKeySequence.StandardKey.SelectAll)
         select_all_action.triggered.connect(self.editor.selectAll)
         edit_menu.addAction(select_all_action)
 
         # Find menu
         find_menu = menubar.addMenu("&Find")
 
-        find_action = QtWidgets.QAction("Find", self)
-        find_action.setShortcut(QtGui.QKeySequence.Find)
+        find_action = QtGui.QAction("Find", self)
+        find_action.setShortcut(QtGui.QKeySequence.StandardKey.Find)
         find_action.triggered.connect(self.show_find_dialog)
         find_menu.addAction(find_action)
 
-        find_next_action = QtWidgets.QAction("Find Next", self)
+        find_next_action = QtGui.QAction("Find Next", self)
         find_next_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+F"))
         find_next_action.triggered.connect(self.find_next)
         find_menu.addAction(find_next_action)
 
-        find_previous_action = QtWidgets.QAction("Find Previous", self)
+        find_previous_action = QtGui.QAction("Find Previous", self)
         find_previous_action.setShortcut(QtGui.QKeySequence("Ctrl+Alt+F"))
         find_previous_action.triggered.connect(self.find_previous)
         find_menu.addAction(find_previous_action)
@@ -463,7 +485,7 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add a separator
         find_menu.addSeparator()
 
-        go_to_line_action = QtWidgets.QAction("Go to Line", self)
+        go_to_line_action = QtGui.QAction("Go to Line", self)
         go_to_line_action.setShortcut(QtGui.QKeySequence("Ctrl+G"))
         go_to_line_action.triggered.connect(self.goToLine)
         find_menu.addAction(go_to_line_action)
@@ -473,14 +495,14 @@ class Pythonico(QtWidgets.QMainWindow):
         
         # Make browser_widget visible or hidden
         browser_widget.setVisible(False)
-        browser_action = QtWidgets.QAction("Toggle AI", self)
+        browser_action = QtGui.QAction("Toggle AI", self)
         browser_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
         browser_action.triggered.connect(lambda: browser_widget.setVisible(
             not browser_widget.isVisible()))
         view_menu.addAction(browser_action)
         
         
-        terminal_action = QtWidgets.QAction("Toggle Terminal", self)
+        terminal_action = QtGui.QAction("Toggle Terminal", self)
         terminal_action.setShortcut(QtGui.QKeySequence("Ctrl+T"))
         terminal_action.triggered.connect(self.toggleTerminal)
         view_menu.addAction(terminal_action)
@@ -488,13 +510,13 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add a separator
         view_menu.addSeparator()
 
-        splitHorizontalAction = QtWidgets.QAction(QtGui.QIcon(),
+        splitHorizontalAction = QtGui.QAction(QtGui.QIcon(),
             "Split Horizontal", self)
         splitHorizontalAction.setShortcut("Ctrl+%")
         # splitHorizontalAction.triggered.connect(self.splitHorizontal)
         view_menu.addAction(splitHorizontalAction)
 
-        splitVerticalAction = QtWidgets.QAction(QtGui.QIcon(),
+        splitVerticalAction = QtGui.QAction(QtGui.QIcon(),
             "Split Vertical", self)
         splitVerticalAction.setShortcut("Ctrl+/")
         # splitVerticalAction.triggered.connect(self.splitVertical)
@@ -503,25 +525,25 @@ class Pythonico(QtWidgets.QMainWindow):
         # Run menu
         run_menu = menubar.addMenu("&Run")
 
-        run_action = QtWidgets.QAction("Run", self)
+        run_action = QtGui.QAction("Run", self)
         run_action.setShortcut(QtGui.QKeySequence("Ctrl+R"))
         run_action.triggered.connect(self.runProgram)
         run_menu.addAction(run_action)
 
         help_menu = menubar.addMenu("&Help")
 
-        website_action = QtWidgets.QAction("Website", self)
+        website_action = QtGui.QAction("Website", self)
         website_action.triggered.connect(self.showWebsiteDialog)
         help_menu.addAction(website_action)
 
         # Add a separator
         help_menu.addSeparator()
 
-        license_action = QtWidgets.QAction("License", self)
+        license_action = QtGui.QAction("License", self)
         license_action.triggered.connect(self.showLicenseDialog)
         help_menu.addAction(license_action)
 
-        about_action = QtWidgets.QAction("About", self)
+        about_action = QtGui.QAction("About", self)
         about_action.triggered.connect(self.showAboutDialog)
         help_menu.addAction(about_action)
 
@@ -541,11 +563,14 @@ class Pythonico(QtWidgets.QMainWindow):
         self.editor.cursorPositionChanged.connect(self.updateStatusBar)
 
         self.show()
+        
+    def close_tab(self, index):
+        self.tab_widget.removeTab(index)
 
     def createNewFile(self):
         # Create a plain text editor widget
         editor = QtWidgets.QPlainTextEdit(self)
-        editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # Set the background color to light yellow
         editor.setStyleSheet("background-color: rgb(253, 246, 227);")
@@ -558,7 +583,7 @@ class Pythonico(QtWidgets.QMainWindow):
         # Set the tab stop width to 4 characters
         font = editor.font()
         font_metrics = QtGui.QFontMetrics(font)
-        tab_width = 4 * font_metrics.width(' ')
+        tab_width = 4 * font_metrics.horizontalAdvance(' ')
         self.editor.setTabStopWidth(tab_width)
 
         # Setup New File Window Name
@@ -567,21 +592,74 @@ class Pythonico(QtWidgets.QMainWindow):
         # Sets an empty File
         self.current_file = None
         self.editor.clear()
+        
+    def createNewTab(self, file_path=None):
+        # Create a plain text editor widget
+        editor = QtWidgets.QPlainTextEdit(self)
+        editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+
+        # Set the background color to Tokyo Night "Day" theme
+        editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
+
+        # Set font size and font type
+        font = QtGui.QFont("Monospace")
+        font.setPointSize(11)
+        editor.setFont(font)
+
+        # Set the tab stop width to 4 characters
+        font_metrics = QtGui.QFontMetrics(font)
+        tab_width = 4 * font_metrics.horizontalAdvance(' ')
+        editor.setTabStopWidth(tab_width)
+
+        # Create LineCountWidget instance
+        line_count = LineCountWidget(editor)
+
+        # Create a layout for the new tab
+        editor_widget = QtWidgets.QWidget()
+        editor_layout = QtWidgets.QHBoxLayout(editor_widget)
+        editor_layout.addWidget(line_count)
+        editor_layout.addWidget(editor)
+
+        # Determine the tab name
+        tab_name = "Untitled"
+        if file_path:
+            file = QtCore.QFile(file_path)
+            if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
+                text_stream = QtCore.QTextStream(file)
+                text = text_stream.readAll()
+                file.close()
+                editor.setPlainText(text)
+                tab_name = QtCore.QFileInfo(file_path).fileName()
+
+        # Add the editor widget to a new tab
+        self.tab_widget.addTab(editor_widget, tab_name)
+
+        # Create a SyntaxHighlighter instance and associate it with the new editor's document
+        self.highlighter = SyntaxHighlighter(editor.document())
+
+        # Install the AutoIndentFilter on the new editor
+        filter = AutoIndentFilter(editor)
+        editor.installEventFilter(filter)
+
+        # Set the current tab to the newly created tab
+        self.tab_widget.setCurrentWidget(editor_widget)
 
     def openFile(self):
         home_dir = QtCore.QDir.homePath()
 
         file_dialog = QtWidgets.QFileDialog(self)
-        file_dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
-        file_dialog.setFileMode(QtWidgets.QFileDialog.ExistingFile)
+        file_dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptMode.AcceptOpen)
+        file_dialog.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFile)
 
         # Set the default directory to home screen
         file_dialog.setDirectory(home_dir)
 
-        if file_dialog.exec_():
+        if file_dialog.exec():
             file_path = file_dialog.selectedFiles()[0]
             file = QtCore.QFile(file_path)
-            if file.open(QtCore.QFile.ReadOnly | QtCore.QFile.Text):
+            if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
                 text_stream = QtCore.QTextStream(file)
                 text = text_stream.readAll()
                 file.close()
@@ -592,20 +670,24 @@ class Pythonico(QtWidgets.QMainWindow):
                 # Update window title
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
 
+                # Update the tab name
+                tab_name = QtCore.QFileInfo(file_path).fileName()
+                current_index = self.tab_widget.currentIndex()
+                self.tab_widget.setTabText(current_index, tab_name)
+
     def save_file(self):
         if self.current_file:
             file_path = self.current_file
         else:
             # No current file is set, prompt the user
             # to choose a file to save
-            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self,
-                "Save File")
+            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File")
             if not file_path:
                 # User canceled the file selection, return without saving
                 return
 
         file = QtCore.QFile(file_path)
-        if file.open(QtCore.QFile.WriteOnly | QtCore.QFile.Text):
+        if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
             text_stream = QtCore.QTextStream(file)
             text_stream << self.editor.toPlainText()
             file.close()
@@ -613,11 +695,10 @@ class Pythonico(QtWidgets.QMainWindow):
             self.setWindowTitle(f"Pythonico - {self.current_file}")
 
     def save_as_file(self):
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self,
-            "Write File:")
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Write File:")
         if file_path:
             file = QtCore.QFile(file_path)
-            if file.open(QtCore.QFile.WriteOnly | QtCore.QFile.Text):
+            if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
                 text_stream = QtCore.QTextStream(file)
                 text_stream << self.editor.toPlainText()
                 file.close()
@@ -634,11 +715,11 @@ class Pythonico(QtWidgets.QMainWindow):
 
     def showLicenseDialog(self):
         show_license = AboutLicenseDialog()
-        show_license.exec_()
+        show_license.exec()
 
     def showAboutDialog(self):
         about_dialog = AboutDialog(self)
-        about_dialog.exec_()
+        about_dialog.exec()
 
     def toggleTerminal(self):
         if self.terminal.isHidden():
@@ -647,11 +728,11 @@ class Pythonico(QtWidgets.QMainWindow):
             self.terminal.hide()
 
     def splitVertical(self):
-        splitterV = QtWidgets.QSplitter(Qt.Vertical)
+        splitterV = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.splitterV.addWidget(QtWidgets.QTextEdit(self))
 
     def splitHorizontal(self):
-        splitterH = QtWidgets.QSplitter(Qt.Horizontal)
+        splitterH = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.splitterH.addWidget(QtWidgets.QTextEdit(self))
 
     def updateStatusBar(self):
@@ -733,7 +814,7 @@ class Pythonico(QtWidgets.QMainWindow):
         options_layout.addWidget(find_button)
 
         layout.addLayout(options_layout)
-        dialog.exec_()
+        dialog.exec()
 
     def find_text(self, search_text, reverse=False):
         flags = re.MULTILINE
@@ -756,7 +837,7 @@ class Pythonico(QtWidgets.QMainWindow):
             match = pattern.search(text, start_pos)
         if match:
             cursor.setPosition(match.start())
-            cursor.setPosition(match.end(), QtGui.QTextCursor.KeepAnchor)
+            cursor.setPosition(match.end(), QtGui.QTextCursor.MoveMode.KeepAnchor)
             self.editor.setTextCursor(cursor)
             self.editor.setFocus()
             return
@@ -765,7 +846,7 @@ class Pythonico(QtWidgets.QMainWindow):
         match = pattern.search(text)
         if match:
             cursor.setPosition(match.start())
-            cursor.setPosition(match.end(), QtGui.QTextCursor.KeepAnchor)
+            cursor.setPosition(match.end(), QtGui.QTextCursor.MoveMode.KeepAnchor)
             self.editor.setTextCursor(cursor)
             
     def find_next(self):
@@ -796,11 +877,11 @@ class Pythonico(QtWidgets.QMainWindow):
                 self.editor.setTextCursor(cursor)
 
                 # Indentation adjustment
-                cursor.movePosition(QtGui.QTextCursor.StartOfLine)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.StartOfLine)
                 indent = len(cursor.block().text()) - len(cursor.block(). \
                     text().lstrip())
-                cursor.movePosition(QtGui.QTextCursor.Right,
-                    QtGui.QTextCursor.MoveAnchor, indent)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.Right,
+                    QtGui.QTextCursor.MoveMode.MoveAnchor, indent)
                 self.editor.setTextCursor(cursor)
         else:
             self.showMessageBox("Go to Line canceled.")
@@ -809,12 +890,12 @@ class Pythonico(QtWidgets.QMainWindow):
         msg_box = QtWidgets.QMessageBox(self)
         msg_box.setText(message)
         msg_box.setWindowTitle("Go to Line")
-        msg_box.setIcon(QtWidgets.QMessageBox.Information)
-        msg_box.addButton(QtWidgets.QMessageBox.Ok)
-        msg_box.exec_()
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        msg_box.exec()
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     editor = Pythonico()
     editor.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
