@@ -625,6 +625,9 @@ class Pythonico(QtWidgets.QMainWindow):
         # Set the current tab to the newly created one
         self.tab_widget.setCurrentWidget(editor_widget)
 
+        # Focus on the new editor
+        new_editor.setFocus()
+
     def updateTabTitle(self, tab_index):
         editor = self.editors.get(tab_index, self.editor)
         tab_name = self.tab_widget.tabText(tab_index)
@@ -774,7 +777,7 @@ class Pythonico(QtWidgets.QMainWindow):
     
     def show_find_dialog(self):
         current_index = self.tab_widget.currentIndex()
-        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+        current_editor = self.editors.get(current_index, self.editor)
 
         if current_editor is None:
             QtWidgets.QMessageBox.warning(self, "No Editor", "No editor available to search in.")
