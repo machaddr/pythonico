@@ -627,6 +627,9 @@ class Pythonico(QtWidgets.QMainWindow):
 
         # Focus on the new editor
         new_editor.setFocus()
+        
+        # Update Line Count Widget
+        line_count.update_line_count()
 
     def updateTabTitle(self, tab_index):
         editor = self.editors.get(tab_index, self.editor)
