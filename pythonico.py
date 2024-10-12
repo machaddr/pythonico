@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import sys, json, keyword, re, webbrowser
-from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineCore , QtWebEngineWidgets, QtNetwork
+import sys, json, asyncio, keyword, re, webbrowser
+from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets, QtNetwork
 from pyqtconsole.console import PythonConsole
 
 class Browser(QtWidgets.QWidget):
@@ -9,7 +9,12 @@ class Browser(QtWidgets.QWidget):
         super().__init__(parent)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.browser = QtWebEngineWidgets.QWebEngineView()
+        self.progress_bar = QtWidgets.QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress bar
         self.cookies = []
+        self.copy_action_browser = QtGui.QAction("Copy", self)
+        self.paste_action_browser = QtGui.QAction("Paste", self)
+        self.select_all_action_browser = QtGui.QAction("Select All", self)
 
         # Determine the appropriate path based on the operating system
         if sys.platform.startswith('linux'):
@@ -31,21 +36,35 @@ class Browser(QtWidgets.QWidget):
                 json.dump([], f)
 
         self.layout.addWidget(self.browser)
+        self.layout.addWidget(self.progress_bar)
         self.setLayout(self.layout)
 
         # Load cookies when initializing
-        self.load_cookies()
+        asyncio.run(self.load_cookies_to_web_engine())
 
         # Save cookies when they change
         profile = self.browser.page().profile()
-        cookie_store = profile.cookieStore()
-        cookie_store.cookieAdded.connect(self.add_cookie)
+        self.cookie_store = profile.cookieStore()
+        self.cookie_store.cookieAdded.connect(self.save_cookies)
+
+        self.copy_action_browser.triggered.connect(lambda: self.browser.triggerPageAction(QtWebEngineWidgets.QWebEnginePage.WebAction.Copy))
+        self.paste_action_browser.triggered.connect(lambda: self.browser.triggerPageAction(QtWebEngineWidgets.QWebEnginePage.WebAction.Paste))
+        self.select_all_action_browser.triggered.connect(lambda: self.browser.triggerPageAction(QtWebEngineWidgets.QWebEnginePage.WebAction.SelectAll))
+
+        # Add shortcuts
+        self.copy_action_browser.setShortcut(QtGui.QKeySequence.StandardKey.Copy)
+        self.paste_action_browser.setShortcut(QtGui.QKeySequence.StandardKey.Paste)
+        self.select_all_action_browser.setShortcut(QtGui.QKeySequence.StandardKey.SelectAll)
+
+        # Connect signals for loading indicator
+        self.browser.loadStarted.connect(self.show_loading)
+        self.browser.loadFinished.connect(self.hide_loading)
 
     def load_url(self, url):
         self.browser.setUrl(QtCore.QUrl(url))
-
-    def add_cookie(self, cookie):
-        """ Add a cookie to the list and save it """
+        
+    def save_cookies(self, cookie):
+        """ Save cookies to a file """
         self.cookies.append({
             'name': cookie.name().data().decode('utf-8'),
             'value': cookie.value().data().decode('utf-8'),
@@ -53,24 +72,21 @@ class Browser(QtWidgets.QWidget):
             'path': cookie.path(),
             'expiry': cookie.expirationDate().toString(QtCore.Qt.DateFormat.ISODate)
         })
-        self.save_json(self.cookies_file, self.cookies)
 
-    def save_json(self, file_path, data):
-        """ Save data to a JSON file """
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=4)
+        with open(self.cookies_file, 'r') as f:
+            self.cookies = json.load(f)
+        with open(self.cookies_file, 'w') as f:
+            json.dump(self.cookies, f)
 
-    def load_cookies(self):
-        """ Load cookies from the JSON file """
-        if QtCore.QFile.exists(self.cookies_file):
-            with open(self.cookies_file, 'r') as f:
-                self.cookies = json.load(f)
-            self.load_cookies_to_web_engine()
-
-    def load_cookies_to_web_engine(self):
+    async def load_cookies_to_web_engine(self):
         """ Load cookies into the web engine """
         profile = self.browser.page().profile()
         cookie_store = profile.cookieStore()
+        
+        # Load cookies from the file
+        with open(self.cookies_file, 'r') as f:
+            self.cookies = json.load(f)
+        
         for cookie in self.cookies:
             qcookie = QtNetwork.QNetworkCookie(
                 cookie['name'].encode('utf-8'),
@@ -80,6 +96,12 @@ class Browser(QtWidgets.QWidget):
             qcookie.setPath(cookie['path'])
             qcookie.setExpirationDate(QtCore.QDateTime.fromString(cookie['expiry'], QtCore.Qt.DateFormat.ISODate))
             cookie_store.setCookie(qcookie)
+
+    def show_loading(self):
+        self.progress_bar.show()
+
+    def hide_loading(self):
+        self.progress_bar.hide()
         
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
@@ -422,7 +444,7 @@ class Pythonico(QtWidgets.QMainWindow):
         browser_widget = QtWidgets.QWidget()
         browser_layout = QtWidgets.QVBoxLayout(browser_widget)
         self.browser = Browser(self)
-        self.browser.load_url("https://www.claude.ai/login")
+        self.browser.load_url("https://claude.ai/login")
         browser_layout.addWidget(self.browser)
         browser_widget.setLayout(browser_layout)
         
