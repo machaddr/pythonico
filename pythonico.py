@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import sys, keyword, re, webbrowser
-from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets
+import sys, json, keyword, re, webbrowser
+from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineCore , QtWebEngineWidgets, QtNetwork
 from pyqtconsole.console import PythonConsole
 
 class Browser(QtWidgets.QWidget):
@@ -9,11 +9,77 @@ class Browser(QtWidgets.QWidget):
         super().__init__(parent)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.browser = QtWebEngineWidgets.QWebEngineView()
+        self.cookies = []
+
+        # Determine the appropriate path based on the operating system
+        if sys.platform.startswith('linux'):
+            storage_path = QtCore.QDir.homePath() + "/.pythonico"
+        elif sys.platform.startswith('win'):
+            storage_path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.AppDataLocation) + "\\Pythonico"
+        else:
+            raise OSError("Unsupported operating system")
+
+        # if the storage directory does not exist, create it
+        if not QtCore.QDir(storage_path).exists():
+            QtCore.QDir().mkpath(storage_path)
+
+        self.cookies_file = storage_path + "/cookies.json"
+
+        # Create the cookies file if it does not exist
+        if not QtCore.QFile.exists(self.cookies_file):
+            with open(self.cookies_file, 'w') as f:
+                json.dump([], f)
+
         self.layout.addWidget(self.browser)
         self.setLayout(self.layout)
 
+        # Load cookies when initializing
+        self.load_cookies()
+
+        # Save cookies when they change
+        profile = self.browser.page().profile()
+        cookie_store = profile.cookieStore()
+        cookie_store.cookieAdded.connect(self.add_cookie)
+
     def load_url(self, url):
         self.browser.setUrl(QtCore.QUrl(url))
+
+    def add_cookie(self, cookie):
+        """ Add a cookie to the list and save it """
+        self.cookies.append({
+            'name': cookie.name().data().decode('utf-8'),
+            'value': cookie.value().data().decode('utf-8'),
+            'domain': cookie.domain(),
+            'path': cookie.path(),
+            'expiry': cookie.expirationDate().toString(QtCore.Qt.DateFormat.ISODate)
+        })
+        self.save_json(self.cookies_file, self.cookies)
+
+    def save_json(self, file_path, data):
+        """ Save data to a JSON file """
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+
+    def load_cookies(self):
+        """ Load cookies from the JSON file """
+        if QtCore.QFile.exists(self.cookies_file):
+            with open(self.cookies_file, 'r') as f:
+                self.cookies = json.load(f)
+            self.load_cookies_to_web_engine()
+
+    def load_cookies_to_web_engine(self):
+        """ Load cookies into the web engine """
+        profile = self.browser.page().profile()
+        cookie_store = profile.cookieStore()
+        for cookie in self.cookies:
+            qcookie = QtNetwork.QNetworkCookie(
+                cookie['name'].encode('utf-8'),
+                cookie['value'].encode('utf-8')
+            )
+            qcookie.setDomain(cookie['domain'])
+            qcookie.setPath(cookie['path'])
+            qcookie.setExpirationDate(QtCore.QDateTime.fromString(cookie['expiry'], QtCore.Qt.DateFormat.ISODate))
+            cookie_store.setCookie(qcookie)
         
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
