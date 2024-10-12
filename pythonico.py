@@ -278,8 +278,17 @@ class AboutDialog(QtWidgets.QDialog):
 class Pythonico(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        # Add the current_file attribute and initialize it as None
+        
+        # Initialize dictionaries at the class level
+        self.editors = {}
+        self.highlighters = {}
+        self.filters = {}
+
         self.current_file = None
+        self.tab_widget = QtWidgets.QTabWidget()
+        
+        self.setCentralWidget(self.tab_widget)
+        
         self.initUI()
 
     def initUI(self):
@@ -298,6 +307,18 @@ class Pythonico(QtWidgets.QMainWindow):
         self.tab_widget = QtWidgets.QTabWidget()
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
+
+        # Function to update tab visibility
+        def update_tab_visibility():
+            if self.tab_widget.count() <= 1:
+                self.tab_widget.tabBar().setVisible(False)
+            else:
+                self.tab_widget.tabBar().setVisible(True)
+
+        # Connect the function to tab changes
+        self.tab_widget.currentChanged.connect(update_tab_visibility)
+        self.tab_widget.tabCloseRequested.connect(lambda index: update_tab_visibility())
+        self.tab_widget.tabBar().setVisible(False)  # Initial state
 
         # Create the plain text editor widget
         editor_widget = QtWidgets.QWidget()
@@ -401,13 +422,8 @@ class Pythonico(QtWidgets.QMainWindow):
 
         new_file_action = QtGui.QAction("New File", self)
         new_file_action.setShortcut(QtGui.QKeySequence("Ctrl+N"))
-        new_file_action.triggered.connect(self.createNewFile)
+        new_file_action.triggered.connect(self.createNewTab)
         file_menu.addAction(new_file_action)
-        
-        new_tab_action = QtGui.QAction("New Tab", self)
-        new_tab_action.setShortcut(QtGui.QKeySequence("Alt+T"))
-        new_tab_action.triggered.connect(self.createNewTab)
-        file_menu.addAction(new_tab_action)
 
         open_file_action = QtGui.QAction("Open", self)
         open_file_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
@@ -545,82 +561,43 @@ class Pythonico(QtWidgets.QMainWindow):
 
         about_action = QtGui.QAction("About", self)
         about_action.triggered.connect(self.showAboutDialog)
-        help_menu.addAction(about_action)
-
-        # Create a status bar
-        self.statusBar = QtWidgets.QStatusBar(self)
-        self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("  Ready")
-
-        # Connect the textChanged signal of the editor to a slot
-        self.editor.textChanged.connect(self.updateStatusBar)
-
-        # Connect the onTextChanged slot to the
-        # textChanged signal of the editor
-        self.editor.textChanged.connect(self.onTextChanged)
-
-        # Connect cursorPositionChanged signal
-        self.editor.cursorPositionChanged.connect(self.updateStatusBar)
-
+        help_menu.addAction(about_action)    
+        
         self.show()
         
     def close_tab(self, index):
         self.tab_widget.removeTab(index)
-
-    def createNewFile(self):
-        # Create a plain text editor widget
-        editor = QtWidgets.QPlainTextEdit(self)
-        editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-
-        # Set the background color to light yellow
-        editor.setStyleSheet("background-color: rgb(253, 246, 227);")
-
-        # Set font size and font type
-        font = QtGui.QFont("Monospace")
-        font.setPointSize(11)
-        editor.setFont(font)
-
-        # Set the tab stop width to 4 characters
-        font = editor.font()
-        font_metrics = QtGui.QFontMetrics(font)
-        tab_width = 4 * font_metrics.horizontalAdvance(' ')
-        self.editor.setTabStopWidth(tab_width)
-
-        # Setup New File Window Name
-        self.setWindowTitle(f"Pythonico - New File")
-
-        # Sets an empty File
-        self.current_file = None
-        self.editor.clear()
+        if self.tab_widget.count() == 0:
+            self.close()
         
     def createNewTab(self, file_path=None):
-        # Create a plain text editor widget
-        editor = QtWidgets.QPlainTextEdit(self)
-        editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
-        editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        # Create a new plain text editor widget
+        new_editor = QtWidgets.QPlainTextEdit(self)
+        new_editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        new_editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        new_editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        # Set the background color to Tokyo Night "Day" theme
-        editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
+        # Set background color for the "Day" theme of Tokyo Night
+        new_editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
 
-        # Set font size and font type
+        # Set font size and type
         font = QtGui.QFont("Monospace")
         font.setPointSize(11)
-        editor.setFont(font)
+        new_editor.setFont(font)
 
-        # Set the tab stop width to 4 characters
+        # Set tab stop width to 4 characters
         font_metrics = QtGui.QFontMetrics(font)
         tab_width = 4 * font_metrics.horizontalAdvance(' ')
-        editor.setTabStopWidth(tab_width)
+        new_editor.setTabStopWidth(tab_width)
 
-        # Create LineCountWidget instance
-        line_count = LineCountWidget(editor)
+        # Create an instance of LineCountWidget
+        line_count = LineCountWidget(new_editor)
 
         # Create a layout for the new tab
         editor_widget = QtWidgets.QWidget()
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
         editor_layout.addWidget(line_count)
-        editor_layout.addWidget(editor)
+        editor_layout.addWidget(new_editor)
 
         # Determine the tab name
         tab_name = "Untitled"
@@ -630,21 +607,31 @@ class Pythonico(QtWidgets.QMainWindow):
                 text_stream = QtCore.QTextStream(file)
                 text = text_stream.readAll()
                 file.close()
-                editor.setPlainText(text)
+                new_editor.setPlainText(text)
                 tab_name = QtCore.QFileInfo(file_path).fileName()
 
         # Add the editor widget to a new tab
-        self.tab_widget.addTab(editor_widget, tab_name)
+        tab_index = self.tab_widget.addTab(editor_widget, tab_name)
 
-        # Create a SyntaxHighlighter instance and associate it with the new editor's document
-        self.highlighter = SyntaxHighlighter(editor.document())
+        # Store unique instances of editor, syntax highlighter, and filter for each tab
+        self.editors[tab_index] = new_editor
+        self.highlighters[tab_index] = SyntaxHighlighter(new_editor.document())
+        self.filters[tab_index] = AutoIndentFilter(new_editor)
+        new_editor.installEventFilter(self.filters[tab_index])
 
-        # Install the AutoIndentFilter on the new editor
-        filter = AutoIndentFilter(editor)
-        editor.installEventFilter(filter)
+        # Connect the textChanged signal to update the tab title with an asterisk
+        new_editor.textChanged.connect(lambda: self.updateTabTitle(tab_index))
 
-        # Set the current tab to the newly created tab
+        # Set the current tab to the newly created one
         self.tab_widget.setCurrentWidget(editor_widget)
+
+    def updateTabTitle(self, tab_index):
+        editor = self.editors.get(tab_index, self.editor)
+        tab_name = self.tab_widget.tabText(tab_index)
+        if editor.document().isModified() and not tab_name.endswith('*'):
+            self.tab_widget.setTabText(tab_index, tab_name + ' ' + '*')
+        elif not editor.document().isModified() and tab_name.endswith('*'):
+            self.tab_widget.setTabText(tab_index, tab_name.rstrip(' *'))
 
     def openFile(self):
         home_dir = QtCore.QDir.homePath()
@@ -663,8 +650,17 @@ class Pythonico(QtWidgets.QMainWindow):
                 text_stream = QtCore.QTextStream(file)
                 text = text_stream.readAll()
                 file.close()
-                self.editor.setPlainText(text)
 
+                # Determine the current editor
+                current_index = self.tab_widget.currentIndex()
+                if current_index in self.editors:
+                    current_editor = self.editors[current_index]
+                else:
+                    current_editor = self.editor
+
+                # Set the content of the current editor
+                current_editor.setPlainText(text)
+                
                 # Update current_file attribute
                 self.current_file = file_path
                 # Update window title
@@ -672,43 +668,52 @@ class Pythonico(QtWidgets.QMainWindow):
 
                 # Update the tab name
                 tab_name = QtCore.QFileInfo(file_path).fileName()
-                current_index = self.tab_widget.currentIndex()
                 self.tab_widget.setTabText(current_index, tab_name)
 
     def save_file(self):
-        if self.current_file:
+        self.editor = self.editors.get(self.tab_widget.currentIndex(), self.editor)
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editors.get(current_index, self.editor)
+
+        if current_editor and self.current_file:
             file_path = self.current_file
         else:
             # No current file is set, prompt the user
-            # to choose a file to save
             file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File")
             if not file_path:
-                # User canceled the file selection, return without saving
                 return
 
         file = QtCore.QFile(file_path)
         if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
             text_stream = QtCore.QTextStream(file)
-            text_stream << self.editor.toPlainText()
+            text_stream << current_editor.toPlainText()
             file.close()
             self.current_file = file_path
             self.setWindowTitle(f"Pythonico - {self.current_file}")
+            self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
 
     def save_as_file(self):
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Write File:")
+        self.editor = self.editors.get(self.tab_widget.currentIndex(), self.editor)
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editors.get(current_index, self.editor)
+
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File As")
         if file_path:
             file = QtCore.QFile(file_path)
             if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
                 text_stream = QtCore.QTextStream(file)
-                text_stream << self.editor.toPlainText()
+                text_stream << current_editor.toPlainText()
                 file.close()
+                self.current_file = file_path
+                self.setWindowTitle(f"Pythonico - {self.current_file}")
+                self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
 
     def onTextChanged(self):
-        # Add an asterisk (*) to the window title to indicate unsaved changes
+        # Add an asterisk (*) to the current editor title to indicate unsaved changes
         if self.current_file:
-            self.setWindowTitle(f"Pythonico - {self.current_file} *")
+            self.setEditorTitle(f"Pythonico - {self.current_file} *")
         else:
-            self.setWindowTitle("Pythonico *")
+            self.setEditorTitle("Pythonico *")
 
     def showWebsiteDialog(self):
         webbrowser.open("https://github.com/machaddr/pythonico")
@@ -735,39 +740,6 @@ class Pythonico(QtWidgets.QMainWindow):
         splitterH = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.splitterH.addWidget(QtWidgets.QTextEdit(self))
 
-    def updateStatusBar(self):
-        cursor = self.editor.textCursor()
-
-        # Current line number
-        block_number = cursor.blockNumber() + 1
-
-        # Total line numbers
-        total_lines = self.editor.document().blockCount()
-
-        # Current column number
-        column = cursor.columnNumber() + 1
-        text = self.editor.toPlainText()
-
-        # Count the total number of words
-        words = text.split()
-        word_count = len(words)
-
-        # Get the current date
-        current_date = QtCore.QDateTime.currentDateTime().toString("dd/MM/yyyy")
-
-        # Get the current time
-        current_time = QtCore.QTime.currentTime().toString("HH:mm")
-
-        # Update the status bar text
-        status_text = (
-            f" |  Line: {block_number}/{total_lines}  "
-            f"| Column: {column}  |  Words: {word_count}  "
-            f"|  {current_date} {current_time} |"
-        )
-
-        # Update the status bar message
-        self.statusBar.showMessage(status_text)
-
     def copyText(self):
         self.terminal.copy()
 
@@ -776,7 +748,9 @@ class Pythonico(QtWidgets.QMainWindow):
 
     def runProgram(self):
         try:
-            content = self.editor.toPlainText()
+            current_index = self.tab_widget.currentIndex()
+            current_editor = self.editors.get(current_index, self.editor)
+            content = current_editor.toPlainText()
             if not content:
                 QtWidgets.QMessageBox.warning(self,
                     "Current Text Stream is Empty",
@@ -799,6 +773,13 @@ class Pythonico(QtWidgets.QMainWindow):
                 f"An error occurred: {e}")
     
     def show_find_dialog(self):
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+
+        if current_editor is None:
+            QtWidgets.QMessageBox.warning(self, "No Editor", "No editor available to search in.")
+            return
+
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Find")
         layout = QtWidgets.QVBoxLayout(dialog)
@@ -809,24 +790,23 @@ class Pythonico(QtWidgets.QMainWindow):
         options_layout = QtWidgets.QVBoxLayout()
 
         find_button = QtWidgets.QPushButton("Find", dialog)
-        find_button.clicked.connect(lambda: self.find_text(
-            search_input.text()))
+        find_button.clicked.connect(lambda: self.find_text(search_input.text(), current_editor))
         options_layout.addWidget(find_button)
 
         layout.addLayout(options_layout)
         dialog.exec()
 
-    def find_text(self, search_text, reverse=False):
+    def find_text(self, search_text, editor, reverse=False):
         flags = re.MULTILINE
 
-        cursor = self.editor.textCursor()
+        cursor = editor.textCursor()
 
         start_pos = (
             cursor.selectionEnd()
             if cursor.hasSelection()
             else cursor.position()
         )
-        text = self.editor.toPlainText()
+        text = editor.toPlainText()
         pattern = re.compile(search_text, flags)
 
         if reverse:
@@ -838,8 +818,8 @@ class Pythonico(QtWidgets.QMainWindow):
         if match:
             cursor.setPosition(match.start())
             cursor.setPosition(match.end(), QtGui.QTextCursor.MoveMode.KeepAnchor)
-            self.editor.setTextCursor(cursor)
-            self.editor.setFocus()
+            editor.setTextCursor(cursor)
+            editor.setFocus()
             return
 
         # If no match found, wrap around to the beginning and search again
@@ -847,20 +827,29 @@ class Pythonico(QtWidgets.QMainWindow):
         if match:
             cursor.setPosition(match.start())
             cursor.setPosition(match.end(), QtGui.QTextCursor.MoveMode.KeepAnchor)
-            self.editor.setTextCursor(cursor)
+            editor.setTextCursor(cursor)
             
     def find_next(self):
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+
         search_text, ok = QtWidgets.QInputDialog.getText(self, "Find Next", "Enter text to find:")
         if ok and search_text:
-            self.find_text(search_text)
+            self.find_text(search_text, current_editor)
 
     def find_previous(self):
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+
         search_text, ok = QtWidgets.QInputDialog.getText(self, "Find Previous", "Enter text to find:")
         if ok and search_text:
-            self.find_text(search_text, reverse=True)
+            self.find_text(search_text, current_editor, reverse=True)
 
     def goToLine(self):
-        max_lines = self.editor.document().blockCount()
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+
+        max_lines = current_editor.document().blockCount()
         line, ok = QtWidgets.QInputDialog.getInt(self, "Go to Line",
             f"Line Number (1 - {max_lines}):", value=1, min=1,
                 max=max_lines)
@@ -870,11 +859,11 @@ class Pythonico(QtWidgets.QMainWindow):
                     "Invalid Line Number",
                     f"The maximum number of lines is {max_lines}.")
             else:
-                cursor = self.editor.textCursor()
+                cursor = current_editor.textCursor()
                 cursor.setPosition(
-                    self.editor.document().findBlockByLineNumber(line - 1). \
+                    current_editor.document().findBlockByLineNumber(line - 1). \
                     position())
-                self.editor.setTextCursor(cursor)
+                current_editor.setTextCursor(cursor)
 
                 # Indentation adjustment
                 cursor.movePosition(QtGui.QTextCursor.MoveOperation.StartOfLine)
@@ -882,7 +871,7 @@ class Pythonico(QtWidgets.QMainWindow):
                     text().lstrip())
                 cursor.movePosition(QtGui.QTextCursor.MoveOperation.Right,
                     QtGui.QTextCursor.MoveMode.MoveAnchor, indent)
-                self.editor.setTextCursor(cursor)
+                current_editor.setTextCursor(cursor)
         else:
             self.showMessageBox("Go to Line canceled.")
 
