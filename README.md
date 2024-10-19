@@ -40,7 +40,7 @@ Before installing Pythonico, make sure you have the following dependencies insta
 - [Python 3.6 or above](https://www.python.org/downloads/)
 - [PyQt6](https://pypi.org/project/PyQt6/)
 - [PyQTConsole](https://pypi.org/project/pyqtconsole/)
-- 
+
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
 ```bash
