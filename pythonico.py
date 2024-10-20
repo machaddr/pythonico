@@ -614,16 +614,14 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add a separator
         view_menu.addSeparator()
 
-        splitHorizontalAction = QtGui.QAction(QtGui.QIcon(),
-            "Split Horizontal", self)
+        splitHorizontalAction = QtGui.QAction(QtGui.QIcon(), "Split Horizontal", self)
         splitHorizontalAction.setShortcut("Ctrl+%")
-        # splitHorizontalAction.triggered.connect(self.splitHorizontal)
+        splitHorizontalAction.triggered.connect(self.splitHorizontal)
         view_menu.addAction(splitHorizontalAction)
 
-        splitVerticalAction = QtGui.QAction(QtGui.QIcon(),
-            "Split Vertical", self)
+        splitVerticalAction = QtGui.QAction(QtGui.QIcon(), "Split Vertical", self)
         splitVerticalAction.setShortcut("Ctrl+/")
-        # splitVerticalAction.triggered.connect(self.splitVertical)
+        splitVerticalAction.triggered.connect(self.splitVertical)
         view_menu.addAction(splitVerticalAction)
 
         # Run menu
@@ -826,14 +824,55 @@ class Pythonico(QtWidgets.QMainWindow):
         else:
             self.terminal.hide()
 
+    def splitCurrentTab(self, orientation):
+        current_index = self.tab_widget.currentIndex()
+        current_widget = self.tab_widget.widget(current_index)
+        current_tab_text = self.tab_widget.tabText(current_index)  # Retrieve current tab text
+
+        if not current_tab_text:  # Ensure the tab text is not empty or undefined
+            current_tab_text = "Untitled"
+
+        splitter = QtWidgets.QSplitter(orientation)
+
+        # Create a new editor with line numbers
+        new_editor_widget = QtWidgets.QWidget()
+        new_editor_layout = QtWidgets.QHBoxLayout(new_editor_widget)
+        new_editor = QtWidgets.QPlainTextEdit()
+        new_editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        new_editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        new_editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        new_editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
+        font = QtGui.QFont("Monospace")
+        font.setPointSize(11)
+        new_editor.setFont(font)
+        font_metrics = QtGui.QFontMetrics(font)
+        tab_width = 4 * font_metrics.horizontalAdvance(' ')
+        new_editor.setTabStopWidth(tab_width)
+
+        new_line_count = LineCountWidget(new_editor)
+        new_editor_layout.addWidget(new_line_count)
+        new_editor_layout.addWidget(new_editor)
+
+        if isinstance(current_widget, QtWidgets.QSplitter) and current_widget.orientation() == orientation:
+            current_widget.addWidget(new_editor_widget)
+        else:
+            splitter.addWidget(current_widget)
+            splitter.addWidget(new_editor_widget)
+            self.tab_widget.removeTab(current_index)
+            self.tab_widget.insertTab(current_index, splitter, current_tab_text)  # Use the retrieved tab text
+
+        # Store unique instances of editor, syntax highlighter, and filter for each tab
+        self.editors[current_index] = new_editor
+        self.highlighters[current_index] = SyntaxHighlighter(new_editor.document())
+        self.filters[current_index] = AutoIndentFilter(new_editor)
+        new_editor.installEventFilter(self.filters[current_index])
+
     def splitVertical(self):
-        splitterV = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self.splitterV.addWidget(QtWidgets.QTextEdit(self))
+        self.splitCurrentTab(QtCore.Qt.Orientation.Horizontal)
 
     def splitHorizontal(self):
-        splitterH = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        self.splitterH.addWidget(QtWidgets.QTextEdit(self))
-
+        self.splitCurrentTab(QtCore.Qt.Orientation.Vertical)
+    
     def copyText(self):
         self.terminal.copy()
 
