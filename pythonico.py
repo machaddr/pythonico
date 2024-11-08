@@ -1,107 +1,89 @@
 #!/usr/bin/env python3
 
-import sys, json, asyncio, keyword, re, webbrowser
-from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets, QtNetwork
+import anthropic
+import sys, keyword, re, requests, webbrowser
+from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
-class Browser(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+class ClaudeAIWorker(QtCore.QThread):
+    response_received = QtCore.pyqtSignal(str)
+
+    def __init__(self, user_input, parent=None):
         super().__init__(parent)
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.browser = QtWebEngineWidgets.QWebEngineView()
-        self.progress_bar = QtWidgets.QProgressBar()
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress bar
-        self.cookies = []
-        self.copy_action_browser = QtGui.QAction("Copy", self)
-        self.paste_action_browser = QtGui.QAction("Paste", self)
-        self.select_all_action_browser = QtGui.QAction("Select All", self)
+        self.user_input = user_input
 
-        # Determine the appropriate path based on the operating system
-        if sys.platform.startswith('linux'):
-            storage_path = QtCore.QDir.homePath() + "/.pythonico"
-        elif sys.platform.startswith('win'):
-            storage_path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.AppDataLocation) + "\\Pythonico"
-        else:
-            raise OSError("Unsupported operating system")
+    def run(self):
+        api_key = "YOUR-CLAUDE-API"  # Store securely
 
-        # if the storage directory does not exist, create it
-        if not QtCore.QDir(storage_path).exists():
-            QtCore.QDir().mkpath(storage_path)
+        client = anthropic.Anthropic(api_key=api_key)
 
-        self.cookies_file = storage_path + "/cookies.json"
-
-        # Create the cookies file if it does not exist
-        if not QtCore.QFile.exists(self.cookies_file):
-            with open(self.cookies_file, 'w') as f:
-                json.dump([], f)
-
-        self.layout.addWidget(self.browser)
-        self.layout.addWidget(self.progress_bar)
-        self.setLayout(self.layout)
-
-        # Load cookies when initializing
-        asyncio.run(self.load_cookies_to_web_engine())
-
-        # Save cookies when they change
-        profile = self.browser.page().profile()
-        self.cookie_store = profile.cookieStore()
-        self.cookie_store.cookieAdded.connect(self.save_cookies)
-
-        self.copy_action_browser.triggered.connect(lambda: self.browser.triggerPageAction(QtWebEngineWidgets.QWebEnginePage.WebAction.Copy))
-        self.paste_action_browser.triggered.connect(lambda: self.browser.triggerPageAction(QtWebEngineWidgets.QWebEnginePage.WebAction.Paste))
-        self.select_all_action_browser.triggered.connect(lambda: self.browser.triggerPageAction(QtWebEngineWidgets.QWebEnginePage.WebAction.SelectAll))
-
-        # Add shortcuts
-        self.copy_action_browser.setShortcut(QtGui.QKeySequence.StandardKey.Copy)
-        self.paste_action_browser.setShortcut(QtGui.QKeySequence.StandardKey.Paste)
-        self.select_all_action_browser.setShortcut(QtGui.QKeySequence.StandardKey.SelectAll)
-
-        # Connect signals for loading indicator
-        self.browser.loadStarted.connect(self.show_loading)
-        self.browser.loadFinished.connect(self.hide_loading)
-
-    def load_url(self, url):
-        self.browser.setUrl(QtCore.QUrl(url))
-        
-    def save_cookies(self, cookie):
-        """ Save cookies to a file """
-        self.cookies.append({
-            'name': cookie.name().data().decode('utf-8'),
-            'value': cookie.value().data().decode('utf-8'),
-            'domain': cookie.domain(),
-            'path': cookie.path(),
-            'expiry': cookie.expirationDate().toString(QtCore.Qt.DateFormat.ISODate)
-        })
-
-        with open(self.cookies_file, 'r') as f:
-            self.cookies = json.load(f)
-        with open(self.cookies_file, 'w') as f:
-            json.dump(self.cookies, f)
-
-    async def load_cookies_to_web_engine(self):
-        """ Load cookies into the web engine """
-        profile = self.browser.page().profile()
-        cookie_store = profile.cookieStore()
-        
-        # Load cookies from the file
-        with open(self.cookies_file, 'r') as f:
-            self.cookies = json.load(f)
-        
-        for cookie in self.cookies:
-            qcookie = QtNetwork.QNetworkCookie(
-                cookie['name'].encode('utf-8'),
-                cookie['value'].encode('utf-8')
+        try:
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                messages=[
+                    {"role": "user", "content": self.user_input}
+                ],
+                max_tokens=1024,
+                temperature=0.7
             )
-            qcookie.setDomain(cookie['domain'])
-            qcookie.setPath(cookie['path'])
-            qcookie.setExpirationDate(QtCore.QDateTime.fromString(cookie['expiry'], QtCore.Qt.DateFormat.ISODate))
-            cookie_store.setCookie(qcookie)
+            self.response_received.emit(response.content[0].text)
+        except Exception as e:
+            self.response_received.emit(f"Error: {e}")
 
-    def show_loading(self):
-        self.progress_bar.show()
+class ClaudeAIWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
 
-    def hide_loading(self):
-        self.progress_bar.hide()
+        # Set up the layout
+        self.layout = QtWidgets.QVBoxLayout(self)
+
+        # Output window (read-only)
+        self.output_window = QtWidgets.QTextEdit(self)
+        self.output_window.setStyleSheet("background-color: #FDF6E3; color: #657B83;")
+        self.output_window.setReadOnly(True)        
+        self.layout.addWidget(self.output_window)
+
+        # Input field and send button layout
+        input_layout = QtWidgets.QHBoxLayout()
+
+        self.input_field = QtWidgets.QLineEdit(self)
+        input_layout.addWidget(self.input_field)
+
+        self.send_button = QtWidgets.QPushButton("Send", self)
+        self.send_button.clicked.connect(self.send_request)
+        input_layout.addWidget(self.send_button)
+
+        self.layout.addLayout(input_layout)
+        
+        # Add a loading spinner while getting the response from Claude
+        self.loading_spinner = QtWidgets.QProgressBar(self)
+        self.loading_spinner.setRange(0, 0)  # Indeterminate progress
+        self.layout.addWidget(self.loading_spinner)
+        self.loading_spinner.hide()  # Hide initially
+
+        # Initialize worker
+        self.worker = ClaudeAIWorker("")
+        self.worker.response_received.connect(self.update_output)
+
+        # Connect signals to show and hide the loading spinner
+        self.worker.started.connect(self.loading_spinner.show)
+        self.worker.finished.connect(self.loading_spinner.hide)
+
+        # Send request on pressing Enter
+        self.input_field.returnPressed.connect(self.send_request)
+        
+        # Set sizeof AI prompt widget
+        self.setFixedWidth(int(0.25 * QtWidgets.QApplication.primaryScreen().size().width()))
+
+    def send_request(self):
+        user_input = str(self.input_field.text())
+        self.worker.user_input = user_input
+        self.worker.start()
+        self.input_field.clear()
+
+    def update_output(self, response):
+        user_input = self.worker.user_input
+        self.output_window.append(f"Human: {user_input}\n\nAssistant: {response}\n")
         
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
@@ -383,6 +365,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.setWindowTitle("Pythonico")
         self.setGeometry(100, 100, 800, 600)
         self.setMinimumSize(640, 400)
+        self.showMaximized()
 
         # Set the window icon
         icon = QtGui.QIcon("icons/main.png")
@@ -422,6 +405,13 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add LineCountWidget to the editor layout
         editor_layout.addWidget(self.line_count)
         editor_layout.addWidget(self.editor)
+        
+        self.claude_ai_widget = ClaudeAIWidget()
+
+        # Create a horizontal splitter to separate the editor and AI prompt panel
+        horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        horizontal_splitter.addWidget(editor_widget)
+        horizontal_splitter.addWidget(self.claude_ai_widget)
 
         # Initialize the tab widget if not already initialized
         if not hasattr(self, 'tab_widget'):
@@ -433,31 +423,9 @@ class Pythonico(QtWidgets.QMainWindow):
             tab_name = QtCore.QFileInfo(self.current_file).fileName()
 
         # Add the editor widget to a new tab
-        self.tab_widget.addTab(editor_widget, tab_name)
+        self.tab_widget.addTab(horizontal_splitter, tab_name)
 
-        # Create a horizontal splitter to separate the editor and AI prompt panel
-        horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        horizontal_splitter.addWidget(self.tab_widget)
-        
-        # Create a widget to hold the browser
-        browser_widget = QtWidgets.QWidget()
-        browser_layout = QtWidgets.QVBoxLayout(browser_widget)
-        self.browser = Browser(self)
-        self.browser.load_url("https://claude.ai/login")
-        browser_layout.addWidget(self.browser)
-        browser_widget.setLayout(browser_layout)
-        
-        # Set the width of the browser widget and make it resizable
-        browser_widget.setFixedWidth(450)
-        
-        # Add the browser widget to the vertical splitter
-        vertical_splitter.addWidget(browser_widget)
-
-        # Add the browser widget to the horizontal splitter
-        horizontal_splitter.addWidget(browser_widget)
-
-        main_splitter.addWidget(horizontal_splitter)
+        main_splitter.addWidget(self.tab_widget)
 
         # Create a sub-splitter for the terminals
         terminal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -595,16 +563,12 @@ class Pythonico(QtWidgets.QMainWindow):
         find_menu.addAction(go_to_line_action)
 
         # View menu
-        view_menu = menubar.addMenu("&View")
+        view_menu = menubar.addMenu("&View")   
         
-        # Make browser_widget visible or hidden
-        browser_widget.setVisible(False)
-        browser_action = QtGui.QAction("Toggle AI", self)
-        browser_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
-        browser_action.triggered.connect(lambda: browser_widget.setVisible(
-            not browser_widget.isVisible()))
-        view_menu.addAction(browser_action)
-        
+        claude_action = QtGui.QAction("Toggle AI Prompt", self)
+        claude_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
+        claude_action.triggered.connect(self.toggleClaudeAI)
+        view_menu.addAction(claude_action)     
         
         terminal_action = QtGui.QAction("Toggle Terminal", self)
         terminal_action.setShortcut(QtGui.QKeySequence("Ctrl+T"))
@@ -666,11 +630,15 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create an instance of LineCountWidget
         line_count = LineCountWidget(new_editor)
 
+        # Create an instance of ClaudeAIWidget
+        ai_prompt = ClaudeAIWidget()
+
         # Create a layout for the new tab
         editor_widget = QtWidgets.QWidget()
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
         editor_layout.addWidget(line_count)
         editor_layout.addWidget(new_editor)
+        editor_layout.addWidget(ai_prompt)
 
         # Determine the tab name
         tab_name = "Untitled"
@@ -804,6 +772,17 @@ class Pythonico(QtWidgets.QMainWindow):
     def showAboutDialog(self):
         about_dialog = AboutDialog(self)
         about_dialog.exec()
+        
+    def toggleClaudeAI(self):
+        current_index = self.tab_widget.currentIndex()
+        current_widget = self.tab_widget.widget(current_index)
+        if current_widget:
+            claude_ai_widget = current_widget.findChild(ClaudeAIWidget)
+            if claude_ai_widget:
+                if claude_ai_widget.isHidden():
+                    claude_ai_widget.show()
+                else:
+                    claude_ai_widget.hide()
 
     def toggleTerminal(self):
         if self.terminal.isHidden():
@@ -902,7 +881,7 @@ class Pythonico(QtWidgets.QMainWindow):
             
     def find_next(self):
         current_index = self.tab_widget.currentIndex()
-        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+        current_editor = self.editors.get(current_index, self.editor)
 
         search_text, ok = QtWidgets.QInputDialog.getText(self, "Find Next", "Enter text to find:")
         if ok and search_text:
@@ -910,7 +889,10 @@ class Pythonico(QtWidgets.QMainWindow):
 
     def find_previous(self):
         current_index = self.tab_widget.currentIndex()
-        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+        current_editor = self.editors.get(current_index, self.editor)
+        if current_editor is None:
+            QtWidgets.QMessageBox.warning(self, "No Editor", "No editor available.")
+            return
 
         search_text, ok = QtWidgets.QInputDialog.getText(self, "Find Previous", "Enter text to find:")
         if ok and search_text:
@@ -918,7 +900,10 @@ class Pythonico(QtWidgets.QMainWindow):
 
     def goToLine(self):
         current_index = self.tab_widget.currentIndex()
-        current_editor = self.editor if not self.editor else self.editors.get(current_index, None)
+        current_editor = self.editors.get(current_index, self.editor)
+        if current_editor is None:
+            QtWidgets.QMessageBox.warning(self, "No Editor", "No editor available.")
+            return
 
         max_lines = current_editor.document().blockCount()
         line, ok = QtWidgets.QInputDialog.getInt(self, "Go to Line",
