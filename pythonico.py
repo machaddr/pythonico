@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import anthropic
-import sys, keyword, re, requests, webbrowser
+import sys, keyword, re, webbrowser
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -23,7 +23,7 @@ class ClaudeAIWorker(QtCore.QThread):
                 messages=[
                     {"role": "user", "content": self.user_input}
                 ],
-                max_tokens=1024,
+                max_tokens=2048,
                 temperature=0.7
             )
             self.response_received.emit(response.content[0].text)
@@ -77,13 +77,16 @@ class ClaudeAIWidget(QtWidgets.QWidget):
 
     def send_request(self):
         user_input = str(self.input_field.text())
-        self.worker.user_input = user_input
-        self.worker.start()
+        if user_input.strip() == "/clear":
+            self.output_window.clear()
+        else:
+            self.worker.user_input = user_input
+            self.worker.start()
         self.input_field.clear()
 
     def update_output(self, response):
         user_input = self.worker.user_input
-        self.output_window.append(f"Human: {user_input}\n\nAssistant: {response}\n")
+        self.output_window.append(f"<span style='color: red; font-weight: bold;'>Human:</span> {user_input}<br><br><span style='color: blue; font-weight: bold;'>Assistant:</span> {response}<br>")
         
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
@@ -257,7 +260,40 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
                 start = match.capturedStart()
                 length = match.capturedLength()
                 self.setFormat(start, length, format)
+                
+class CodeAutoCompleter(QtWidgets.QCompleter):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        self.setCompletionMode(QtWidgets.QCompleter.CompletionMode.PopupCompletion)
+        self.setWrapAround(False)
+        self.activated.connect(self.insertCompletion)
 
+    def splitPath(self, path):
+        return path.split('.')
+
+    def pathFromIndex(self, index):
+        path = index.data(QtCore.Qt.ItemDataRole.DisplayRole)
+        return path
+
+    def setModel(self, model):
+        super().setModel(model)
+        self.popup().setStyleSheet("background-color: #657B83; color: white;")
+
+    def setCompletionPrefix(self, prefix):
+        super().setCompletionPrefix(prefix)
+        popup = self.popup()
+        popup.setStyleSheet("background-color: #657B83; color: white;")
+        popup.setCurrentIndex(self.completionModel().index(0, 0))
+
+    def insertCompletion(self, completion):
+        if self.widget() is not None:
+            cursor = self.widget().textCursor()
+            cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+            cursor.removeSelectedText()
+            cursor.insertText(completion)
+            self.widget().setTextCursor(cursor)
+    
 class AboutLicenseDialog(QtWidgets.QDialog):
     def __init__(self):
         super().__init__()
@@ -353,6 +389,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.editors = {}
         self.highlighters = {}
         self.filters = {}
+        self.completers = {}
 
         self.current_file = None
         self.tab_widget = QtWidgets.QTabWidget()
@@ -362,6 +399,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.initUI()
 
     def initUI(self):
+        self.completer = None
         self.setWindowTitle("Pythonico")
         self.setGeometry(100, 100, 800, 600)
         self.setMinimumSize(640, 400)
@@ -396,11 +434,10 @@ class Pythonico(QtWidgets.QMainWindow):
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
         self.editor = QtWidgets.QPlainTextEdit()
         self.editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
-
+        
         # Create LineCountWidget instance
         self.line_count = LineCountWidget(self.editor)
         self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # Add LineCountWidget to the editor layout
         editor_layout.addWidget(self.line_count)
@@ -469,6 +506,15 @@ class Pythonico(QtWidgets.QMainWindow):
 
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
+        
+        self.completer = CodeAutoCompleter()
+        self.completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
+        self.completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        self.completer.setWrapAround(False)
+
+        # Connect the completer to the editor
+        self.completer.setWidget(self.editor)
+        self.editor.textChanged.connect(self.update_completer)
         
         # Create a menu bar
         menubar = self.menuBar()
@@ -612,7 +658,6 @@ class Pythonico(QtWidgets.QMainWindow):
         new_editor = QtWidgets.QPlainTextEdit(self)
         new_editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
         new_editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        new_editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # Set background color for the "Day" theme of Tokyo Night
         new_editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
@@ -654,11 +699,22 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add the editor widget to a new tab
         tab_index = self.tab_widget.addTab(editor_widget, tab_name)
 
-        # Store unique instances of editor, syntax highlighter, and filter for each tab
+        # Store unique instances of editor, syntax highlighter, filter, and completer for each tab
         self.editors[tab_index] = new_editor
         self.highlighters[tab_index] = SyntaxHighlighter(new_editor.document())
         self.filters[tab_index] = AutoIndentFilter(new_editor)
         new_editor.installEventFilter(self.filters[tab_index])
+
+        # Set up a code completer for the new editor
+        completer = CodeAutoCompleter()
+        completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
+        completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        completer.setWrapAround(False)
+        completer.setWidget(new_editor)
+        new_editor.textChanged.connect(lambda: self.update_completer_for_editor(new_editor, completer))
+
+        # Store the completer for the new tab
+        self.completers[tab_index] = completer
 
         # Connect the textChanged signal to update the tab title with an asterisk
         new_editor.textChanged.connect(lambda: self.updateTabTitle(tab_index))
@@ -671,6 +727,20 @@ class Pythonico(QtWidgets.QMainWindow):
         
         # Update Line Count Widget
         line_count.update_line_count()
+
+    def update_completer_for_editor(self, editor, completer):
+        cursor = editor.textCursor()
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        word = cursor.selectedText()
+        completer.setCompletionPrefix(word)
+        completer.complete()
+
+    def update_completer(self):
+        cursor = self.editor.textCursor()
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        word = cursor.selectedText()
+        self.completer.setCompletionPrefix(word)
+        self.completer.complete()
 
     def updateTabTitle(self, tab_index):
         editor = self.editors.get(tab_index, self.editor)
@@ -713,6 +783,7 @@ class Pythonico(QtWidgets.QMainWindow):
                 # Update window title
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
 
+    def save_file(self):
                 # Update the tab name
                 tab_name = QtCore.QFileInfo(file_path).fileName()
                 self.tab_widget.setTabText(current_index, tab_name)

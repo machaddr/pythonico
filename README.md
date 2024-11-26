@@ -17,7 +17,7 @@ This code is still in Alpha, many features may lack in the code.
 ## Features
 - **Syntax Highlighting:** 
 Provides syntax highlighting for Python code to improve code readability.
-- TODO **Code Auto-Completion:** 
+- **Code Auto-Completion:** 
 Offers auto-completion suggestions while typing to increase productivity.
 - TODO **Code Snippets:** 
 Includes a library of code snippets for common Python programming tasks.
