@@ -797,11 +797,6 @@ class Pythonico(QtWidgets.QMainWindow):
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
 
     def save_file(self):
-                # Update the tab name
-                tab_name = QtCore.QFileInfo(file_path).fileName()
-                self.tab_widget.setTabText(current_index, tab_name)
-
-    def save_file(self):
         self.editor = self.editors.get(self.tab_widget.currentIndex(), self.editor)
         current_index = self.tab_widget.currentIndex()
         current_editor = self.editors.get(current_index, self.editor)
@@ -1032,7 +1027,14 @@ class Pythonico(QtWidgets.QMainWindow):
         if color.isValid():
             current_index = self.tab_widget.currentIndex()
             current_editor = self.editors.get(current_index, self.editor)
-            current_editor.setStyleSheet(f"background-color: {color.name()};")
+            background_color = color.name()
+
+            # Calculate the contrast color for the font
+            r, g, b = color.red(), color.green(), color.blue()
+            brightness = (r * 299 + g * 587 + b * 114) / 1000
+            font_color = "#000000" if brightness > 125 else "#FFFFFF"
+
+            current_editor.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
 
     def showMessageBox(self, message):
         msg_box = QtWidgets.QMessageBox(self)
