@@ -21,13 +21,13 @@ Provides syntax highlighting for Python code to improve code readability.
 Offers auto-completion suggestions while typing to increase productivity.
 - TODO **Code Snippets:** 
 Includes a library of code snippets for common Python programming tasks.
-- TODO **Multiple Tabs:** 
+- **Multiple Tabs:** 
 Allows opening multiple files simultaneously with a tabbed interface.
 - TODO **Customization:** 
 Provides options to customize the appearance and behavior of the text editor.
 - **Search and Replace:** 
 Enables searching for specific text patterns and replacing them as needed.
-- TODO **Code Formatting:** 
+- **Code Formatting:** 
 Offers automatic code formatting for consistent and clean code.
 - TODO **Error Highlighting:** 
 Highlights syntax errors and warnings in the code for easy identification.
@@ -39,12 +39,13 @@ Before installing Pythonico, make sure you have the following dependencies insta
 
 - [Python 3.6 or above](https://www.python.org/downloads/)
 - [PyQt6](https://pypi.org/project/PyQt6/)
+- [Anthropic](https://pypi.org/project/anthropic/)
 - [PyQTConsole](https://pypi.org/project/pyqtconsole/)
 
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
 ```bash
-pip install PyQt6 pyqtconsole
+pip install PyQt6 anthropic pyqtconsole
 ```
 
 If you prefer there's other method, use your distro to install the listed dependencies for Pythonico in your package manager without `pip`.
