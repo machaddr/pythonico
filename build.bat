@@ -8,8 +8,8 @@ if exist build (
     rmdir /s /q build
 )
 
-REM Run PyInstaller
-pyinstaller --onefile pythonico.py
+REM Run PyInstaller with icon
+pyinstaller --clean --onefile --windowed --add-data "icons/main.png;icons" --icon="icons/main.ico" pythonico.py
 
 REM Clean up unnecessary build files
 if exist __pycache__ (
