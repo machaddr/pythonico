@@ -23,7 +23,7 @@ Offers auto-completion suggestions while typing to increase productivity.
 Includes a library of code snippets for common Python programming tasks.
 - **Multiple Tabs:** 
 Allows opening multiple files simultaneously with a tabbed interface.
-- TODO **Customization:** 
+- **Customization:** 
 Provides options to customize the appearance and behavior of the text editor.
 - **Search and Replace:** 
 Enables searching for specific text patterns and replacing them as needed.

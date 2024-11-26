@@ -628,7 +628,20 @@ class Pythonico(QtWidgets.QMainWindow):
         run_action.setShortcut(QtGui.QKeySequence("Ctrl+R"))
         run_action.triggered.connect(self.runProgram)
         run_menu.addAction(run_action)
-
+        
+        # Settings menu
+        settings_menu = menubar.addMenu("&Settings")
+        
+        font_action = QtGui.QAction("Font", self)
+        settings_menu.addAction(font_action)
+        font_action.triggered.connect(self.font_dialog)
+        
+        theme_action = QtGui.QAction("Theme", self)
+        settings_menu.addAction(theme_action)     
+        theme_action.triggered.connect(self.theme_dialog)
+        
+        
+        # Help menu
         help_menu = menubar.addMenu("&Help")
 
         website_action = QtGui.QAction("Website", self)
@@ -1001,6 +1014,25 @@ class Pythonico(QtWidgets.QMainWindow):
                 current_editor.setTextCursor(cursor)
         else:
             self.showMessageBox("Go to Line canceled.")
+            
+    def font_dialog(self):
+        font, ok = QtWidgets.QFontDialog.getFont()
+        if ok:
+            current_index = self.tab_widget.currentIndex()
+            current_editor = self.editors.get(current_index, self.editor)
+            current_editor.setFont(font)
+            
+            # Change font for current LineCountWidget
+            line_count_widget = current_editor.parentWidget().findChild(LineCountWidget)
+            if line_count_widget:
+                line_count_widget.setFont(font)
+            
+    def theme_dialog(self):
+        color = QtWidgets.QColorDialog.getColor()
+        if color.isValid():
+            current_index = self.tab_widget.currentIndex()
+            current_editor = self.editors.get(current_index, self.editor)
+            current_editor.setStyleSheet(f"background-color: {color.name()};")
 
     def showMessageBox(self, message):
         msg_box = QtWidgets.QMessageBox(self)
