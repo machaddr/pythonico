@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import anthropic
-import sys, keyword, re, webbrowser
+import os, sys, keyword, re, webbrowser, json
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -40,6 +40,12 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         # Output window (read-only)
         self.output_window = QtWidgets.QTextEdit(self)
         self.output_window.setStyleSheet("background-color: #FDF6E3; color: #657B83;")
+        
+        # Set font size and type
+        font = QtGui.QFont("Monospace")
+        font.setPointSize(11)
+        self.output_window.setFont(font)
+        
         self.output_window.setReadOnly(True)        
         self.layout.addWidget(self.output_window)
 
@@ -74,6 +80,8 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         
         # Set sizeof AI prompt widget
         self.setFixedWidth(int(0.25 * QtWidgets.QApplication.primaryScreen().size().width()))
+        
+        # 
 
     def send_request(self):
         user_input = str(self.input_field.text())
@@ -402,7 +410,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.completer = None
         self.setWindowTitle("Pythonico")
         self.setGeometry(100, 100, 800, 600)
-        self.setMinimumSize(640, 400)
+        self.setMinimumSize(800, 600)
         self.showMaximized()
 
         # Set the window icon
@@ -428,6 +436,9 @@ class Pythonico(QtWidgets.QMainWindow):
         self.tab_widget.currentChanged.connect(update_tab_visibility)
         self.tab_widget.tabCloseRequested.connect(lambda index: update_tab_visibility())
         self.tab_widget.tabBar().setVisible(False)  # Initial state
+        
+        # If selected tab then change to its title and filename
+        self.tab_widget.currentChanged.connect(self.update_current_file)
 
         # Create the plain text editor widget
         editor_widget = QtWidgets.QWidget()
@@ -516,6 +527,23 @@ class Pythonico(QtWidgets.QMainWindow):
         self.completer.setWidget(self.editor)
         self.editor.textChanged.connect(self.update_completer)
         
+        # add a status bar
+        self.status_bar = QtWidgets.QStatusBar()
+        self.setStatusBar(self.status_bar)
+
+        # Add labels to the status bar
+        self.line_label = QtWidgets.QLabel("Line: 1")
+        self.column_label = QtWidgets.QLabel("Column: 1")
+        self.file_label = QtWidgets.QLabel(f"File: {self.current_file if self.current_file else 'Untitled'}")
+
+        self.status_bar.addPermanentWidget(self.line_label, 1)
+        self.status_bar.addPermanentWidget(self.column_label, 1)
+        self.status_bar.addPermanentWidget(self.file_label, 1)
+
+        # Connect signals to update the status bar
+        self.editor.cursorPositionChanged.connect(self.update_status_bar)
+        self.tab_widget.currentChanged.connect(self.update_status_bar)
+        
         # Create a menu bar
         menubar = self.menuBar()
 
@@ -543,6 +571,30 @@ class Pythonico(QtWidgets.QMainWindow):
         save_as_action.setShortcut(QtGui.QKeySequence.StandardKey.SaveAs)
         save_as_action.triggered.connect(self.save_as_file)
         file_menu.addAction(save_as_action)
+        
+        # Separator
+        file_menu.addSeparator()
+        
+        # Save Session
+        save_session_action = QtGui.QAction("Save Session", self)
+        save_session_action.triggered.connect(self.save_session)
+        file_menu.addAction(save_session_action)
+        
+        # Load Session
+        load_session_action = QtGui.QAction("Load Session", self)
+        load_session_action.triggered.connect(self.load_session)
+        file_menu.addAction(load_session_action)
+        
+        # Separator
+        file_menu.addSeparator()
+        
+        # Close All Tabs
+        close_all_tabs_action = QtGui.QAction("Close All Tabs", self)
+        close_all_tabs_action.triggered.connect(self.close_all_tabs)
+        file_menu.addAction(close_all_tabs_action)
+        
+        # Separator
+        file_menu.addSeparator()
 
         exit_action = QtGui.QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -632,15 +684,59 @@ class Pythonico(QtWidgets.QMainWindow):
         # Settings menu
         settings_menu = menubar.addMenu("&Settings")
         
-        font_action = QtGui.QAction("Font", self)
-        settings_menu.addAction(font_action)
-        font_action.triggered.connect(self.font_dialog)
+        editor_font_action = QtGui.QAction("Editor Font", self)
+        settings_menu.addAction(editor_font_action)
+        editor_font_action.triggered.connect(self.editor_font_dialog)
         
-        theme_action = QtGui.QAction("Theme", self)
-        settings_menu.addAction(theme_action)     
-        theme_action.triggered.connect(self.theme_dialog)
+        editor_theme_action = QtGui.QAction("Editor Theme", self)
+        settings_menu.addAction(editor_theme_action)     
+        editor_theme_action.triggered.connect(self.editor_theme_dialog)
         
+        apply_font_to_all_editors_action = QtGui.QAction("Apply Font to All Editors", self)
+        settings_menu.addAction(apply_font_to_all_editors_action)
+        apply_font_to_all_editors_action.triggered.connect(self.apply_font_to_all_editors)
         
+        apply_theme_to_all_editors_action = QtGui.QAction("Apply Theme to All Editors", self)
+        settings_menu.addAction(apply_theme_to_all_editors_action)
+        apply_theme_to_all_editors_action.triggered.connect(self.apply_theme_to_all_editors)
+        
+        # Add a separator
+        settings_menu.addSeparator()
+        
+        assistant_font_action = QtGui.QAction("Assistant Font", self)
+        settings_menu.addAction(assistant_font_action)
+        assistant_font_action.triggered.connect(self.assistant_font_dialog)
+        
+        assistant_theme_action = QtGui.QAction("Assistant Theme", self)
+        settings_menu.addAction(assistant_theme_action)     
+        assistant_theme_action.triggered.connect(self.assistant_theme_dialog)
+        
+        apply_font_to_all_assistants_action = QtGui.QAction("Apply Font to All Assistants", self)
+        settings_menu.addAction(apply_font_to_all_assistants_action)
+        apply_font_to_all_assistants_action.triggered.connect(self.apply_font_to_all_assistants)
+        
+        apply_theme_to_all_assistants_action = QtGui.QAction("Apply Theme to All Assistants", self)
+        settings_menu.addAction(apply_theme_to_all_assistants_action)
+        apply_theme_to_all_assistants_action.triggered.connect(self.apply_theme_to_all_assistants)
+        
+        # Add a separator
+        settings_menu.addSeparator()
+        
+        terminal_font_action = QtGui.QAction("Terminal Font", self)
+        settings_menu.addAction(terminal_font_action)
+        terminal_font_action.triggered.connect(self.terminal_font_dialog)
+        
+        terminal_theme_action = QtGui.QAction("Terminal Theme", self)
+        settings_menu.addAction(terminal_theme_action)
+        terminal_theme_action.triggered.connect(self.terminal_theme_dialog)
+        
+        # Add a separator
+        settings_menu.addSeparator()
+        
+        reset_all_settings_action = QtGui.QAction("Reset All", self)
+        settings_menu.addAction(reset_all_settings_action)
+        reset_all_settings_action.triggered.connect(self.reset_all_settings)
+                       
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -701,13 +797,14 @@ class Pythonico(QtWidgets.QMainWindow):
         # Determine the tab name
         tab_name = "Untitled"
         if file_path:
-            file = QtCore.QFile(file_path)
+            file_path_str = file_path if isinstance(file_path, str) else file_path[0]
+            file = QtCore.QFile(file_path_str)
             if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
                 text_stream = QtCore.QTextStream(file)
                 text = text_stream.readAll()
                 file.close()
                 new_editor.setPlainText(text)
-                tab_name = QtCore.QFileInfo(file_path).fileName()
+                tab_name = QtCore.QFileInfo(file_path_str).fileName()
 
         # Add the editor widget to a new tab
         tab_index = self.tab_widget.addTab(editor_widget, tab_name)
@@ -729,9 +826,6 @@ class Pythonico(QtWidgets.QMainWindow):
         # Store the completer for the new tab
         self.completers[tab_index] = completer
 
-        # Connect the textChanged signal to update the tab title with an asterisk
-        new_editor.textChanged.connect(lambda: self.updateTabTitle(tab_index))
-
         # Set the current tab to the newly created one
         self.tab_widget.setCurrentWidget(editor_widget)
 
@@ -740,6 +834,11 @@ class Pythonico(QtWidgets.QMainWindow):
         
         # Update Line Count Widget
         line_count.update_line_count()
+        
+        # Connect signals to update the status bar
+        self.editors[tab_index].cursorPositionChanged.connect(self.update_status_bar)
+        self.tab_widget.currentChanged.connect(self.update_status_bar)
+        self.file_label.setText(f"File: {tab_name}")
 
     def update_completer_for_editor(self, editor, completer):
         cursor = editor.textCursor()
@@ -754,14 +853,14 @@ class Pythonico(QtWidgets.QMainWindow):
         word = cursor.selectedText()
         self.completer.setCompletionPrefix(word)
         self.completer.complete()
-
-    def updateTabTitle(self, tab_index):
-        editor = self.editors.get(tab_index, self.editor)
-        tab_name = self.tab_widget.tabText(tab_index)
-        if editor.document().isModified() and not tab_name.endswith('*'):
-            self.tab_widget.setTabText(tab_index, tab_name + ' ' + '*')
-        elif not editor.document().isModified() and tab_name.endswith('*'):
-            self.tab_widget.setTabText(tab_index, tab_name.rstrip(' *'))
+            
+    def update_current_file(self, tab_index):
+        self.editor = self.editors.get(tab_index, self.editor)
+        self.current_file = self.tab_widget.tabText(tab_index)
+        if self.current_file:
+            self.setWindowTitle(f"Pythonico - {self.current_file}")
+        else:
+            self.setWindowTitle("Pythonico")
 
     def openFile(self):
         home_dir = QtCore.QDir.homePath()
@@ -783,10 +882,7 @@ class Pythonico(QtWidgets.QMainWindow):
 
                 # Determine the current editor
                 current_index = self.tab_widget.currentIndex()
-                if current_index in self.editors:
-                    current_editor = self.editors[current_index]
-                else:
-                    current_editor = self.editor
+                current_editor = self.editors.get(current_index, self.editor)
 
                 # Set the content of the current editor
                 current_editor.setPlainText(text)
@@ -795,14 +891,17 @@ class Pythonico(QtWidgets.QMainWindow):
                 self.current_file = file_path
                 # Update window title
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
+                
+                # Update tab name with only the file name
+                self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
 
     def save_file(self):
-        self.editor = self.editors.get(self.tab_widget.currentIndex(), self.editor)
         current_index = self.tab_widget.currentIndex()
-        current_editor = self.editors.get(current_index, self.editor)
+        current_editor = self.editors.get(current_index, self.editor) or self.editor
 
-        if current_editor and self.current_file:
-            file_path = self.current_file
+        current_file = self.tab_widget.tabText(current_index)
+        if current_file and current_file != "Untitled":
+            file_path = current_file
         else:
             # No current file is set, prompt the user
             file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File")
@@ -821,7 +920,7 @@ class Pythonico(QtWidgets.QMainWindow):
     def save_as_file(self):
         self.editor = self.editors.get(self.tab_widget.currentIndex(), self.editor)
         current_index = self.tab_widget.currentIndex()
-        current_editor = self.editors.get(current_index, self.editor)
+        current_editor = self.editors.get(current_index, self.editor) or self.editor
 
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File As")
         if file_path:
@@ -1010,7 +1109,7 @@ class Pythonico(QtWidgets.QMainWindow):
         else:
             self.showMessageBox("Go to Line canceled.")
             
-    def font_dialog(self):
+    def editor_font_dialog(self):
         font, ok = QtWidgets.QFontDialog.getFont()
         if ok:
             current_index = self.tab_widget.currentIndex()
@@ -1022,7 +1121,7 @@ class Pythonico(QtWidgets.QMainWindow):
             if line_count_widget:
                 line_count_widget.setFont(font)
             
-    def theme_dialog(self):
+    def editor_theme_dialog(self):
         color = QtWidgets.QColorDialog.getColor()
         if color.isValid():
             current_index = self.tab_widget.currentIndex()
@@ -1035,6 +1134,212 @@ class Pythonico(QtWidgets.QMainWindow):
             font_color = "#000000" if brightness > 125 else "#FFFFFF"
 
             current_editor.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
+            
+    def assistant_font_dialog(self):
+        font, ok = QtWidgets.QFontDialog.getFont()
+        if ok:
+            current_index = self.tab_widget.currentIndex()
+            current_widget = self.tab_widget.widget(current_index)
+            if current_widget:
+                claude_ai_widget = current_widget.findChild(ClaudeAIWidget)
+                if claude_ai_widget:
+                    claude_ai_widget.output_window.setFont(font)
+            
+    def assistant_theme_dialog(self):
+        color = QtWidgets.QColorDialog.getColor()
+        if color.isValid():
+            background_color = color.name()
+
+            # Calculate the contrast color for the font
+            r, g, b = color.red(), color.green(), color.blue()
+            brightness = (r * 299 + g * 587 + b * 114) / 1000
+            font_color = "#000000" if brightness > 125 else "#FFFFFF"
+
+            current_index = self.tab_widget.currentIndex()
+            current_widget = self.tab_widget.widget(current_index)
+            if current_widget:
+                claude_ai_widget = current_widget.findChild(ClaudeAIWidget)
+                if claude_ai_widget:
+                    claude_ai_widget.output_window.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
+            
+    def apply_font_to_all_editors(self):
+        font, ok = QtWidgets.QFontDialog.getFont()
+        if ok:
+            # Apply font to the first editor
+            self.editor.setFont(font)
+            
+            # Apply font to all other editors
+            for editor in self.editors.values():
+                editor.setFont(font)
+                
+            # Change font for all LineCountWidgets
+            for line_count_widget in self.findChildren(LineCountWidget):
+                line_count_widget.setFont(font)
+    
+    def apply_theme_to_all_editors(self):
+        color = QtWidgets.QColorDialog.getColor()
+        if color.isValid():
+            background_color = color.name()
+
+            # Calculate the contrast color for the font
+            r, g, b = color.red(), color.green(), color.blue()
+            brightness = (r * 299 + g * 587 + b * 114) / 1000
+            font_color = "#000000" if brightness > 125 else "#FFFFFF"
+
+            # Apply theme to the first editor
+            self.editor.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
+
+            # Apply theme to all other editors
+            for editor in self.editors.values():
+                editor.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
+                
+    def apply_font_to_all_assistants(self):
+        font, ok = QtWidgets.QFontDialog.getFont()
+        if ok:
+            for assistant in self.findChildren(ClaudeAIWidget):
+                assistant.output_window.setFont(font)
+    
+    def apply_theme_to_all_assistants(self):
+        color = QtWidgets.QColorDialog.getColor()
+        if color.isValid():
+            background_color = color.name()
+
+            # Calculate the contrast color for the font
+            r, g, b = color.red(), color.green(), color.blue()
+            brightness = (r * 299 + g * 587 + b * 114) / 1000
+            font_color = "#000000" if brightness > 125 else "#FFFFFF"
+
+            for assistant in self.findChildren(ClaudeAIWidget):
+                assistant.output_window.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
+                
+    def terminal_font_dialog(self):
+        font, ok = QtWidgets.QFontDialog.getFont()
+        if ok:
+            self.terminal.setFont(font)
+    
+    def terminal_theme_dialog(self):
+        color = QtWidgets.QColorDialog.getColor()
+        if color.isValid():
+            background_color = color.name()
+
+            # Calculate the contrast color for the font
+            r, g, b = color.red(), color.green(), color.blue()
+            brightness = (r * 299 + g * 587 + b * 114) / 1000
+            font_color = "#000000" if brightness > 125 else "#FFFFFF"
+
+            self.terminal.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
+    
+    def reset_all_settings(self):
+        # Reset the first editor
+        self.editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
+        font = QtGui.QFont("Monospace")
+        font.setPointSize(11)
+        self.editor.setFont(font)
+        
+        # Reset all editors
+        for editor in self.editors.values():
+            editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
+            font = QtGui.QFont("Monospace")
+            font.setPointSize(11)
+            editor.setFont(font)
+            
+        # Reset all assistants
+        for assistant in self.findChildren(ClaudeAIWidget):
+            assistant.output_window.setStyleSheet("background-color: #FDF6E3; color: #657B83;")
+            font = QtGui.QFont("Monospace")
+            font.setPointSize(11)
+            assistant.output_window.setFont(font)
+            
+        # Reset the terminal
+        self.terminal.setStyleSheet("background-color: white; color: black;")
+
+    def save_session(self):
+        home_dir = QtCore.QDir.homePath() + "/.pythonico"
+        if not QtCore.QDir(home_dir).exists():
+            QtCore.QDir().mkpath(home_dir)
+        
+        session_file, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Session", home_dir)
+        if session_file:
+            session_data = {
+                "text_files": [],
+                "editors_settings": [],
+                "assistants_settings": [],
+                "terminal_settings": {}
+            }
+                  
+            for index in range(self.tab_widget.count()):
+                editor = self.editors.get(index, self.editor)
+                file_path = self.tab_widget.tabText(index).replace(" *", "")
+                if file_path == "Untitled":
+                    session_data["text_files"].append({"path": None, "content": editor.toPlainText()})
+                else:
+                    session_data["text_files"].append({"path": file_path, "content": editor.toPlainText()})
+
+            for index in range(self.tab_widget.count()):
+                editor = self.editors.get(index, self.editor)
+                editor_settings = {
+                    "editor_font": editor.font().toString(),
+                    "editor_theme": editor.styleSheet(),
+                }
+                session_data["editors_settings"].append(editor_settings)
+
+            for assistant in self.findChildren(ClaudeAIWidget):
+                assistant_settings = {
+                    "assistant_font": assistant.output_window.font().toString(),
+                    "assistant_theme": assistant.output_window.styleSheet()
+                }
+                session_data["assistants_settings"].append(assistant_settings)
+
+            session_data["terminal_settings"] = {
+                "terminal_font": self.terminal.font().toString(),
+                "terminal_theme": self.terminal.styleSheet()
+            }
+
+            with open(session_file, "w") as file:
+                json.dump(session_data, file, indent=4)
+                    
+    def load_session(self):
+        home_dir = QtCore.QDir.homePath() + "/.pythonico"
+        
+        session_file, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Session", home_dir)
+        if session_file:
+            with open(session_file, "r") as file:
+                session_data = json.load(file)
+
+                # Close the initial "Untitled" tab if multiple tabs are being loaded
+                if len(session_data["text_files"]) > 1:
+                    self.tab_widget.removeTab(0)
+
+                # Load text files
+                for text_file in session_data["text_files"]:
+                    if text_file["path"]:
+                        self.createNewTab(text_file["path"])
+                        current_index = self.tab_widget.currentIndex()
+                        self.editors[current_index].setPlainText(text_file["content"])
+
+                # Load editors settings
+                for index, settings in enumerate(session_data["editors_settings"]):
+                    editor = self.tab_widget.widget(index).findChild(QtWidgets.QPlainTextEdit)
+                    editor.setFont(QtGui.QFont(settings["editor_font"]))
+                    editor.setStyleSheet(settings["editor_theme"])
+
+                # Load assistants settings
+                assistants = self.findChildren(ClaudeAIWidget)
+                for index, settings in enumerate(session_data["assistants_settings"]):
+                    if index < len(assistants):
+                        assistant = assistants[index]
+                        assistant.output_window.setFont(QtGui.QFont(settings["assistant_font"]))
+                        assistant.output_window.setStyleSheet(settings["assistant_theme"])
+
+                # Load terminal settings
+                terminal_settings = session_data["terminal_settings"]
+                self.terminal.setFont(QtGui.QFont(terminal_settings["terminal_font"]))
+                self.terminal.setStyleSheet(terminal_settings["terminal_theme"])
+                
+    def close_all_tabs(self):
+        while self.tab_widget.count() > 1:
+            self.tab_widget.removeTab(1)
+            self.tab_widget.tabBar().setVisible(False)
 
     def showMessageBox(self, message):
         msg_box = QtWidgets.QMessageBox(self)
@@ -1043,6 +1348,22 @@ class Pythonico(QtWidgets.QMainWindow):
         msg_box.setIcon(QtWidgets.QMessageBox.Icon.Information)
         msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
         msg_box.exec()
+        
+    def update_status_bar(self):
+        current_index = self.tab_widget.currentIndex()
+        # Get editor from the editors dictionary using current tab index
+        current_editor = self.editors.get(current_index) if current_index in self.editors else self.editor
+
+        if current_editor and hasattr(current_editor, 'textCursor'):
+            cursor = current_editor.textCursor()
+            line = cursor.blockNumber() + 1
+            column = cursor.columnNumber() + 1
+            self.line_label.setText(f"Line: {line}")
+            self.column_label.setText(f"Column: {column}")
+
+            # Update file label based on the current tab's file path
+            file_path = self.tab_widget.tabText(current_index) or "Untitled"
+            self.file_label.setText(f"File: {os.path.basename(file_path)}")
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
