@@ -423,6 +423,7 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create the tab widget
         self.tab_widget = QtWidgets.QTabWidget()
         self.tab_widget.setTabsClosable(True)
+        self.tab_widget.setMovable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
 
         # Function to update tab visibility
@@ -554,6 +555,9 @@ class Pythonico(QtWidgets.QMainWindow):
         new_file_action.setShortcut(QtGui.QKeySequence("Ctrl+N"))
         new_file_action.triggered.connect(self.createNewTab)
         file_menu.addAction(new_file_action)
+        
+        # Separator
+        file_menu.addSeparator()
 
         open_file_action = QtGui.QAction("Open", self)
         open_file_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
@@ -613,6 +617,9 @@ class Pythonico(QtWidgets.QMainWindow):
         redo_action.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
         redo_action.triggered.connect(self.editor.redo)
         edit_menu.addAction(redo_action)
+        
+        # Separator
+        edit_menu.addSeparator()
 
         cut_action = QtGui.QAction("Cut", self)
         cut_action.setShortcut(QtGui.QKeySequence.StandardKey.Cut)
@@ -628,6 +635,9 @@ class Pythonico(QtWidgets.QMainWindow):
         paste_action.setShortcut(QtGui.QKeySequence.StandardKey.Paste)
         paste_action.triggered.connect(self.editor.paste)
         edit_menu.addAction(paste_action)
+        
+        # Separator
+        edit_menu.addSeparator()
 
         select_all_action = QtGui.QAction("Select All", self)
         select_all_action.setShortcut(QtGui.QKeySequence.StandardKey.SelectAll)
@@ -641,6 +651,9 @@ class Pythonico(QtWidgets.QMainWindow):
         find_action.setShortcut(QtGui.QKeySequence.StandardKey.Find)
         find_action.triggered.connect(self.show_find_dialog)
         find_menu.addAction(find_action)
+
+        # Separator
+        find_menu.addSeparator()
 
         find_next_action = QtGui.QAction("Find Next", self)
         find_next_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+F"))
@@ -692,6 +705,9 @@ class Pythonico(QtWidgets.QMainWindow):
         settings_menu.addAction(editor_theme_action)     
         editor_theme_action.triggered.connect(self.editor_theme_dialog)
         
+        # Separator
+        settings_menu.addSeparator()
+        
         apply_font_to_all_editors_action = QtGui.QAction("Apply Font to All Editors", self)
         settings_menu.addAction(apply_font_to_all_editors_action)
         apply_font_to_all_editors_action.triggered.connect(self.apply_font_to_all_editors)
@@ -710,6 +726,9 @@ class Pythonico(QtWidgets.QMainWindow):
         assistant_theme_action = QtGui.QAction("Assistant Theme", self)
         settings_menu.addAction(assistant_theme_action)     
         assistant_theme_action.triggered.connect(self.assistant_theme_dialog)
+        
+        # Separator
+        settings_menu.addSeparator()
         
         apply_font_to_all_assistants_action = QtGui.QAction("Apply Font to All Assistants", self)
         settings_menu.addAction(apply_font_to_all_assistants_action)
@@ -867,33 +886,37 @@ class Pythonico(QtWidgets.QMainWindow):
 
         file_dialog = QtWidgets.QFileDialog(self)
         file_dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptMode.AcceptOpen)
-        file_dialog.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFile)
+        file_dialog.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFiles)  # Allow multiple file selection
 
         # Set the default directory to home screen
         file_dialog.setDirectory(home_dir)
 
         if file_dialog.exec():
-            file_path = file_dialog.selectedFiles()[0]
-            file = QtCore.QFile(file_path)
-            if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
-                text_stream = QtCore.QTextStream(file)
-                text = text_stream.readAll()
-                file.close()
+            file_paths = file_dialog.selectedFiles()  # Get the list of selected files
+            for file_path in file_paths:
+                file = QtCore.QFile(file_path)
+                if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
+                    text_stream = QtCore.QTextStream(file)
+                    text = text_stream.readAll()
+                    file.close()
 
-                # Determine the current editor
-                current_index = self.tab_widget.currentIndex()
-                current_editor = self.editors.get(current_index, self.editor)
+                    # Create a new tab for each file
+                    if self.tab_widget.count() == 1 and self.tab_widget.tabText(0) == "Untitled":
+                        self.tab_widget.removeTab(0)
+                    self.createNewTab(file_path)
+                    current_index = self.tab_widget.currentIndex()
+                    current_editor = self.editors.get(current_index, self.editor)
 
-                # Set the content of the current editor
-                current_editor.setPlainText(text)
-                
-                # Update current_file attribute
-                self.current_file = file_path
-                # Update window title
-                self.setWindowTitle(f"Pythonico - {self.current_file}")
-                
-                # Update tab name with only the file name
-                self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
+                    # Set the content of the current editor
+                    current_editor.setPlainText(text)
+
+                    # Update current_file attribute
+                    self.current_file = file_path
+                    # Update window title
+                    self.setWindowTitle(f"Pythonico - {self.current_file}")
+
+                    # Update tab name with only the file name
+                    self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
 
     def save_file(self):
         current_index = self.tab_widget.currentIndex()
@@ -1243,12 +1266,19 @@ class Pythonico(QtWidgets.QMainWindow):
             font.setPointSize(11)
             editor.setFont(font)
             
+        # Reset LineCountWidgets
+        for line_count_widget in self.findChildren(LineCountWidget):
+            font = QtGui.QFont("Monospace")
+            font.setPointSize(11)
+            line_count_widget.setFont(font)
+            
         # Reset all assistants
         for assistant in self.findChildren(ClaudeAIWidget):
             assistant.output_window.setStyleSheet("background-color: #FDF6E3; color: #657B83;")
             font = QtGui.QFont("Monospace")
             font.setPointSize(11)
             assistant.output_window.setFont(font)
+            
             
         # Reset the terminal
         self.terminal.setStyleSheet("background-color: white; color: black;")
@@ -1258,7 +1288,9 @@ class Pythonico(QtWidgets.QMainWindow):
         if not QtCore.QDir(home_dir).exists():
             QtCore.QDir().mkpath(home_dir)
         
-        session_file, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Session", home_dir)
+        session_file, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Session", home_dir, "JSON Files (*.json)")
+        if session_file and not session_file.endswith(".json"):
+            session_file += ".json"
         if session_file:
             session_data = {
                 "text_files": [],
@@ -1301,7 +1333,7 @@ class Pythonico(QtWidgets.QMainWindow):
     def load_session(self):
         home_dir = QtCore.QDir.homePath() + "/.pythonico"
         
-        session_file, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Session", home_dir)
+        session_file, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Session", home_dir, "JSON Files (*.json)")
         if session_file:
             with open(session_file, "r") as file:
                 session_data = json.load(file)
