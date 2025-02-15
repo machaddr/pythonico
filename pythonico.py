@@ -928,7 +928,8 @@ class Pythonico(QtWidgets.QMainWindow):
         file_path = current_editor.property("file_path")
         if not file_path:
             # No current file is set, prompt the user
-            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File")
+            home_dir = QtCore.QDir.homePath()
+            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", home_dir)
             if not file_path:
                 return
 
@@ -946,7 +947,8 @@ class Pythonico(QtWidgets.QMainWindow):
         current_index = self.tab_widget.currentIndex()
         current_editor = self.editors.get(current_index, self.editor) or self.editor
 
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File As")
+        home_dir = QtCore.QDir.homePath()
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File As", home_dir)
         if file_path:
             file = QtCore.QFile(file_path)
             if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
