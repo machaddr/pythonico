@@ -918,14 +918,15 @@ class Pythonico(QtWidgets.QMainWindow):
                     # Update tab name with only the file name
                     self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
 
+                    # Store the file path in the editor's property
+                    current_editor.setProperty("file_path", file_path)
+
     def save_file(self):
         current_index = self.tab_widget.currentIndex()
         current_editor = self.editors.get(current_index, self.editor) or self.editor
 
-        current_file = self.tab_widget.tabText(current_index)
-        if current_file and current_file != "Untitled":
-            file_path = current_file
-        else:
+        file_path = current_editor.property("file_path")
+        if not file_path:
             # No current file is set, prompt the user
             file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File")
             if not file_path:
@@ -939,9 +940,9 @@ class Pythonico(QtWidgets.QMainWindow):
             self.current_file = file_path
             self.setWindowTitle(f"Pythonico - {self.current_file}")
             self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
+            current_editor.setProperty("file_path", file_path)
 
     def save_as_file(self):
-        self.editor = self.editors.get(self.tab_widget.currentIndex(), self.editor)
         current_index = self.tab_widget.currentIndex()
         current_editor = self.editors.get(current_index, self.editor) or self.editor
 
@@ -955,6 +956,7 @@ class Pythonico(QtWidgets.QMainWindow):
                 self.current_file = file_path
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
                 self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
+                current_editor.setProperty("file_path", file_path)
 
     def onTextChanged(self):
         # Add an asterisk (*) to the current editor title to indicate unsaved changes
