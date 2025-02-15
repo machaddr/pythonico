@@ -592,6 +592,11 @@ class Pythonico(QtWidgets.QMainWindow):
         # Separator
         file_menu.addSeparator()
         
+        # Close Tab
+        close_tab_action = QtGui.QAction("Close Tab", self)
+        close_tab_action.triggered.connect(lambda: self.close_tab(self.tab_widget.currentIndex()))
+        file_menu.addAction(close_tab_action)
+        
         # Close All Tabs
         close_all_tabs_action = QtGui.QAction("Close All Tabs", self)
         close_all_tabs_action.triggered.connect(self.close_all_tabs)
@@ -959,6 +964,19 @@ class Pythonico(QtWidgets.QMainWindow):
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
                 self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
                 current_editor.setProperty("file_path", file_path)
+
+    def close_tab(self, index):
+        if self.tab_widget.count() > 1:
+            reply = QtWidgets.QMessageBox.question(self, 'Save Changes',
+                "Do you want to save changes to the current document before closing?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No | QtWidgets.QMessageBox.StandardButton.Cancel)
+            if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+                self.save_file()
+            elif reply == QtWidgets.QMessageBox.StandardButton.Cancel:
+                return
+        self.tab_widget.removeTab(index)
+        if self.tab_widget.count() == 0:
+            self.close()
 
     def onTextChanged(self):
         # Add an asterisk (*) to the current editor title to indicate unsaved changes
