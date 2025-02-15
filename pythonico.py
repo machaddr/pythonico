@@ -782,6 +782,14 @@ class Pythonico(QtWidgets.QMainWindow):
         self.show()
         
     def close_tab(self, index):
+        if self.tab_widget.count() > 1:
+            reply = QtWidgets.QMessageBox.question(self, 'Save Changes',
+                "Do you want to save changes to the current document before closing?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No | QtWidgets.QMessageBox.StandardButton.Cancel)
+            if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+                self.save_file()
+            elif reply == QtWidgets.QMessageBox.StandardButton.Cancel:
+                return
         self.tab_widget.removeTab(index)
         if self.tab_widget.count() == 0:
             self.close()
@@ -1392,8 +1400,18 @@ class Pythonico(QtWidgets.QMainWindow):
                 
     def close_all_tabs(self):
         while self.tab_widget.count() > 1:
-            self.tab_widget.removeTab(1)
-            self.tab_widget.tabBar().setVisible(False)
+            current_index = self.tab_widget.currentIndex()
+            current_editor = self.editors.get(current_index, self.editor)
+            if current_editor.document().isModified():
+                reply = QtWidgets.QMessageBox.question(self, 'Save Changes',
+                    "Do you want to save changes to the current document before closing?",
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No | QtWidgets.QMessageBox.StandardButton.Cancel)
+                if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+                    self.save_file()
+                elif reply == QtWidgets.QMessageBox.StandardButton.Cancel:
+                    return
+            self.tab_widget.removeTab(current_index)
+        self.tab_widget.tabBar().setVisible(False)
 
     def showMessageBox(self, message):
         msg_box = QtWidgets.QMessageBox(self)
