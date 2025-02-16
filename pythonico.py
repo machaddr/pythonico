@@ -738,8 +738,21 @@ class Pythonico(QtWidgets.QMainWindow):
         if self.current_file:
             tab_name = QtCore.QFileInfo(self.current_file).fileName()
 
+        # Create a SyntaxHighlighter instance and associate it
+        # with the text editor's document
+        self.highlighter = SyntaxHighlighter(self.editor.document())
+
         # Add the editor widget to a new tab
-        self.tab_widget.addTab(horizontal_splitter, tab_name)
+        tab_index = self.tab_widget.addTab(horizontal_splitter, tab_name)
+        
+        self.editors[tab_index] = self.editor
+        self.highlighters[tab_index] = self.highlighter
+        
+        auto_indent_filter = AutoIndentFilter(self.editor)
+        self.filters[tab_index] = auto_indent_filter
+        self.editor.installEventFilter(auto_indent_filter)
+
+        self.completers[tab_index] = self.completer
 
         main_splitter.addWidget(self.tab_widget)
 
