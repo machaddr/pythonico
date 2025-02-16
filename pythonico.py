@@ -1668,16 +1668,19 @@ class Pythonico(QtWidgets.QMainWindow):
 
                 # Load text files
                 for text_file in session_data["text_files"]:
-                    if text_file["path"]:
-                        self.createNewTab(text_file["path"])
-                        current_index = self.tab_widget.currentIndex()
-                        self.editors[current_index].setPlainText(text_file["content"])
+                    self.createNewTab(text_file["path"])
+                    current_index = self.tab_widget.currentIndex()
+                    self.editors[current_index].setPlainText(text_file["content"])
 
                 # Load editors settings
                 for index, settings in enumerate(session_data["editors_settings"]):
-                    editor = self.tab_widget.widget(index).findChild(QtWidgets.QPlainTextEdit)
-                    editor.setFont(QtGui.QFont(settings["editor_font"]))
-                    editor.setStyleSheet(settings["editor_theme"])
+                    if index < self.tab_widget.count():
+                        editor_widget = self.tab_widget.widget(index)
+                        if editor_widget:
+                            editor = editor_widget.findChild(QtWidgets.QPlainTextEdit)
+                            if editor:
+                                editor.setFont(QtGui.QFont(settings["editor_font"]))
+                                editor.setStyleSheet(settings["editor_theme"])
 
                 # Load assistants settings
                 assistants = self.findChildren(ClaudeAIWidget)
