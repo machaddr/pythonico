@@ -1069,6 +1069,22 @@ class Pythonico(QtWidgets.QMainWindow):
                 return
 
         self.tab_widget.removeTab(index)
+        if index in self.editors:
+            del self.editors[index]
+        if index in self.highlighters:
+            del self.highlighters[index]
+        if index in self.filters:
+            del self.filters[index]
+        if index in self.completers:
+            del self.completers[index]
+
+        # Reorder the remaining tabs' indices
+        for i in range(index, self.tab_widget.count()):
+            self.editors[i] = self.editors.pop(i + 1)
+            self.highlighters[i] = self.highlighters.pop(i + 1)
+            self.filters[i] = self.filters.pop(i + 1)
+            self.completers[i] = self.completers.pop(i + 1)
+
         if self.tab_widget.count() == 0:
             self.close()
         
