@@ -203,10 +203,28 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
         self.highlighting_rules = []
 
-        # Parentheses
+        # Highlight only matching parentheses
         parentheses_format = QtGui.QTextCharFormat()
         parentheses_format.setForeground(QtGui.QColor("#DF8C8C"))
-        self.add_rule(QtCore.QRegularExpression(r"[(){}\[\]]"), parentheses_format)
+
+        def highlight_parentheses(text):
+            pairs = {'(': ')', '[': ']', '{': '}'}
+            stack = []
+            for i, ch in enumerate(text):
+                if ch in pairs:
+                    stack.append((ch, i))
+                elif ch in pairs.values():
+                    if stack and pairs[stack[-1][0]] == ch:
+                        _, open_index = stack.pop()
+                        self.setFormat(open_index, 1, parentheses_format)
+                        self.setFormat(i, 1, parentheses_format)
+
+        # Remove the old rule with r"[(){}\[\]]" and handle in highlightBlock
+        original_highlightBlock = self.highlightBlock
+        def new_highlightBlock(text):
+            original_highlightBlock(text)
+            highlight_parentheses(text)
+        self.highlightBlock = new_highlightBlock
 
         # Variables (only if there's an assignment)
         variable_format = QtGui.QTextCharFormat()
