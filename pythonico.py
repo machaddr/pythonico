@@ -78,10 +78,8 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         # Send request on pressing Enter
         self.input_field.returnPressed.connect(self.send_request)
         
-        # Set sizeof AI prompt widget
+        # Set size of AI prompt widget
         self.setFixedWidth(int(0.25 * QtWidgets.QApplication.primaryScreen().size().width()))
-        
-        # 
 
     def send_request(self):
         user_input = str(self.input_field.text())
@@ -92,10 +90,26 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             self.worker.start()
         self.input_field.clear()
 
+    def format_markdown_code_blocks(self, text):
+        # Detect code fences and wrap them in HTML for better readability
+        pattern = r'```(python)?(.*?)```'
+        def replacer(match):
+            code_text = match.group(2).replace('<', '&lt;').replace('>', '&gt;')
+            if match.group(1):
+                # Python code
+                return f"<pre><code style='color: #0000AA;'>{code_text}</code></pre>"
+            else:
+                # No specified language
+                return f"<pre><code>{code_text}</code></pre>"
+        return re.sub(pattern, replacer, text, flags=re.DOTALL)
+
     def update_output(self, response):
         user_input = self.worker.user_input
-        self.output_window.append(f"<span style='color: red; font-weight: bold;'>Human:</span> {user_input}<br><br><span style='color: blue; font-weight: bold;'>Assistant:</span> {response}<br>")
-        
+        formatted_response = self.format_markdown_code_blocks(response)
+        self.output_window.append(
+            f"<span style='color: red; font-weight: bold;'>Human:</span> {user_input}<br><br>"
+            f"<span style='color: blue; font-weight: bold;'>Assistant:</span> {formatted_response}<br>"
+        )
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
     def __init__(self, editor):
