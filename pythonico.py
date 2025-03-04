@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import anthropic
-import os, sys, keyword, re, webbrowser, json
+import os, sys, keyword, re, webbrowser, json, pkgutil
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -310,12 +310,21 @@ class CodeAutoCompleter(QtWidgets.QCompleter):
         self.setWrapAround(False)
         self.activated.connect(self.insertCompletion)
 
+        # Gather built-in functions and installed modules
+        builtins_list = sorted(dir(__builtins__))
+        modules_list = sorted([m.name for m in pkgutil.iter_modules()])
+
+        all_symbols = builtins_list + modules_list
+
+        # Create a model with all discovered symbols
+        self.setModel(QtCore.QStringListModel(all_symbols))
+        self.popup().setStyleSheet("background-color: #657B83; color: white;")
+
     def splitPath(self, path):
         return path.split('.')
 
     def pathFromIndex(self, index):
-        path = index.data(QtCore.Qt.ItemDataRole.DisplayRole)
-        return path
+        return index.data(QtCore.Qt.ItemDataRole.DisplayRole)
 
     def setModel(self, model):
         super().setModel(model)
