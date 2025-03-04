@@ -31,6 +31,12 @@ class ClaudeAIWorker(QtCore.QThread):
             self.response_received.emit(f"Error: {e}")
 
 class ClaudeAIWidget(QtWidgets.QWidget):
+    def closeEvent(self, event):
+        if self.worker.isRunning():
+            self.worker.quit()
+            self.worker.wait()
+        event.accept()
+        
     def __init__(self):
         super().__init__()
 
@@ -110,6 +116,7 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             f"<span style='color: red; font-weight: bold;'>Human:</span> {user_input}<br><br>"
             f"<span style='color: blue; font-weight: bold;'>Assistant:</span> {formatted_response}<br>"
         )
+        
 # Create a custom widget to display line numbers
 class LineCountWidget(QtWidgets.QTextEdit):
     def __init__(self, editor):
