@@ -201,8 +201,23 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
     def __init__(self, document):
         super().__init__(document)
 
-        # Define the highlighting rules
         self.highlighting_rules = []
+
+        # Parentheses
+        parentheses_format = QtGui.QTextCharFormat()
+        parentheses_format.setForeground(QtGui.QColor("#DF8C8C"))
+        self.add_rule(QtCore.QRegularExpression(r"[(){}\[\]]"), parentheses_format)
+
+        # Variables (only if there's an assignment)
+        variable_format = QtGui.QTextCharFormat()
+        variable_format.setForeground(QtGui.QColor("#60A8A6"))
+        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_]\w*\b(?=.*=)"), variable_format)
+
+        # Highlight import statements
+        import_format = QtGui.QTextCharFormat()
+        import_format.setForeground(QtGui.QColor("#DE935F"))
+        self.add_rule(QtCore.QRegularExpression(r"\bimport\s+[a-zA-Z_]\w*\b"), import_format)
+        self.add_rule(QtCore.QRegularExpression(r"\bfrom\s+[a-zA-Z_]\w*\s+import\b"), import_format)
 
         # Keyword format
         keyword_format = QtGui.QTextCharFormat()
