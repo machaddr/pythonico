@@ -230,7 +230,7 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         self.parentheses_format.setFontWeight(QtGui.QFont.Weight.Bold)
         
         # Add rule for parentheses, brackets and braces
-        self.add_rule(QtCore.QRegularExpression(r"[\(\)\[\]\{\}]"), self.parentheses_format)
+        self.add_rule(QtCore.QRegularExpression("[\\(\\)\\[\\]\\{\\}]"), self.parentheses_format)
 
         # Variables (only if there's an assignment)
         variable_format = QtGui.QTextCharFormat()
@@ -290,8 +290,11 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         # Extend highlightBlock to include the import checking
         original_highlightBlock = self.highlightBlock
         def new_highlight_block_with_imports(text):
-            original_highlightBlock(text)
-            highlightImports(text)
+            try:
+                original_highlightBlock(text)
+                highlightImports(text)
+            except:
+                pass
         self.highlightBlock = new_highlight_block_with_imports
 
         # Keyword format
