@@ -224,28 +224,13 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
         self.highlighting_rules = []
 
-        # Highlight only matching parentheses
-        parentheses_format = QtGui.QTextCharFormat()
-        parentheses_format.setForeground(QtGui.QColor("#DF8C8C"))
-
-        def highlight_parentheses(text):
-            pairs = {'(': ')', '[': ']', '{': '}'}
-            stack = []
-            for i, ch in enumerate(text):
-                if ch in pairs:
-                    stack.append((ch, i))
-                elif ch in pairs.values():
-                    if stack and pairs[stack[-1][0]] == ch:
-                        _, open_index = stack.pop()
-                        self.setFormat(open_index, 1, parentheses_format)
-                        self.setFormat(i, 1, parentheses_format)
-
-        # Remove the old rule with r"[(){}\[\]]" and handle in highlightBlock
-        original_highlightBlock = self.highlightBlock
-        def new_highlightBlock(text):
-            original_highlightBlock(text)
-            highlight_parentheses(text)
-        self.highlightBlock = new_highlightBlock
+        # Highlight parentheses
+        self.parentheses_format = QtGui.QTextCharFormat()
+        self.parentheses_format.setForeground(QtGui.QColor("#DF8C8C"))
+        self.parentheses_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Add rule for parentheses, brackets and braces
+        self.add_rule(QtCore.QRegularExpression(r"[\(\)\[\]\{\}]"), self.parentheses_format)
 
         # Variables (only if there's an assignment)
         variable_format = QtGui.QTextCharFormat()
@@ -255,8 +240,59 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         # Highlight import statements
         import_format = QtGui.QTextCharFormat()
         import_format.setForeground(QtGui.QColor("#DE935F"))
-        self.add_rule(QtCore.QRegularExpression(r"\bimport\s+[a-zA-Z_]\w*\b"), import_format)
+        
+        # Normal import format for existing modules
+        self.add_rule(QtCore.QRegularExpression(r"\bimport\s+([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\b"), import_format)
         self.add_rule(QtCore.QRegularExpression(r"\bfrom\s+[a-zA-Z_]\w*\s+import\b"), import_format)
+        
+        # Special handling for modules that don't exist
+        def highlightImports(text):
+            # Match import statements
+            import_pattern = re.compile(r"\bimport\s+([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)")
+            from_import_pattern = re.compile(r"\bfrom\s+([a-zA-Z_]\w*)\s+import\b")
+            
+            # Check if modules exist
+            for match in import_pattern.finditer(text):
+                full_import = match.group(1)
+                modules = [m.strip() for m in full_import.split(',')]
+                start_pos = match.start(1)  # Start position of the module list
+                
+                # Track current position
+                current_pos = start_pos
+                
+                for module in modules:
+                    # Find exact location of this module in the import statement
+                    module_start = text.find(module, current_pos)
+                    current_pos = module_start + len(module)
+                    
+                    try:
+                        __import__(module)
+                    except ImportError:
+                        if module_start != -1:
+                            # Module doesn't exist, mark only this module in red
+                            error_format = QtGui.QTextCharFormat()
+                            error_format.setForeground(QtGui.QColor("red"))
+                            error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
+                            self.setFormat(module_start, len(module), error_format)
+            
+            # Check from ... import statements
+            for match in from_import_pattern.finditer(text):
+                module = match.group(1)
+                try:
+                    __import__(module)
+                except ImportError:
+                    # Module doesn't exist, mark in red
+                    error_format = QtGui.QTextCharFormat()
+                    error_format.setForeground(QtGui.QColor("red"))
+                    error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
+                    self.setFormat(match.start(), match.end() - match.start(), error_format)
+            
+        # Extend highlightBlock to include the import checking
+        original_highlightBlock = self.highlightBlock
+        def new_highlight_block_with_imports(text):
+            original_highlightBlock(text)
+            highlightImports(text)
+        self.highlightBlock = new_highlight_block_with_imports
 
         # Keyword format
         keyword_format = QtGui.QTextCharFormat()
@@ -267,11 +303,12 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
         # Built-in functions format
         builtin_format = QtGui.QTextCharFormat()
-        builtin_format.setForeground(QtGui.QColor("#DCA561"))
-        builtin_format.setFontWeight(QtGui.QFont.Weight.Bold)
-        builtins = dir(__builtins__)
-        self.add_keywords(builtins, builtin_format)
-
+        builtin_format.setForeground(QtGui.QColor("#8EC07C"))
+        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"), builtin_format)
+        
+        # Store the import highlighting function
+        self.highlight_imports_func = highlightImports
+            
         # String format
         string_format = QtGui.QTextCharFormat()
         string_format.setForeground(QtGui.QColor("brown"))
@@ -341,14 +378,44 @@ class CodeAutoCompleter(QtWidgets.QCompleter):
         self.setModel(QtCore.QStringListModel(all_symbols))
         self.popup().setStyleSheet("background-color: #657B83; color: white;")
 
-    def splitPath(self, path):
-        return path.split('.')
-
-    def pathFromIndex(self, index):
-        return index.data(QtCore.Qt.ItemDataRole.DisplayRole)
-
-    def setModel(self, model):
-        super().setModel(model)
+    def highlightBlock(self, text):
+        # Apply basic syntax rules
+        for pattern, format in self.highlighting_rules:
+            expression = pattern.globalMatch(text)
+            while expression.hasNext():
+                match = expression.next()
+                start = match.capturedStart()
+                length = match.capturedLength()
+                self.setFormat(start, length, format)
+                
+        # Apply special import checking
+        self.highlight_imports_func(text)
+        
+        # Apply matching parentheses highlighting
+        self.highlightMatchingBraces(text)
+        
+    def highlightMatchingBraces(self, text):
+        pairs = {'(': ')', '[': ']', '{': '}'}
+        stack = []
+        matching_pairs = []  # Store all matching pairs
+        
+        # First pass: identify all matching pairs
+        for i, ch in enumerate(text):
+            if ch in pairs:
+                stack.append((ch, i))
+            elif ch in pairs.values():
+                if stack and pairs[stack[-1][0]] == ch:
+                    open_char, open_index = stack.pop()
+                    matching_pairs.append((open_index, i))  # Store the matching pair
+        
+        # Second pass: apply highlighting to all matching pairs
+        matching_format = QtGui.QTextCharFormat()
+        matching_format.setForeground(QtGui.QColor("#FF5555"))
+        matching_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        for open_index, close_index in matching_pairs:
+            self.setFormat(open_index, 1, matching_format)
+            self.setFormat(close_index, 1, matching_format)
         self.popup().setStyleSheet("background-color: #657B83; color: white;")
 
     def setCompletionPrefix(self, prefix):
