@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import anthropic
-import os, sys, keyword, re, webbrowser, json, pkgutil
+import os, sys, markdown, keyword, re, webbrowser, json, pkgutil
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -86,6 +86,12 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         
         # Set size of AI prompt widget
         self.setFixedWidth(int(0.25 * QtWidgets.QApplication.primaryScreen().size().width()))
+        
+        # Try to import markdown library
+        try:
+            self.markdown_module = markdown
+        except ImportError:
+            self.markdown_module = None
 
     def send_request(self):
         user_input = str(self.input_field.text())
@@ -96,22 +102,67 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             self.worker.start()
         self.input_field.clear()
 
+    def format_markdown(self, text):
+        """
+        Convert markdown text to HTML using a markdown transpiler.
+        Uses the markdown library if available, otherwise falls back to basic formatter.
+        """
+        if self.markdown_module:
+            try:
+                # Convert markdown to HTML with code highlighting
+                html = self.markdown_module.markdown(text, extensions=['fenced_code'])
+                return html
+            except:
+                pass  # Fall back to basic formatter on error
+        
+        # Fallback to basic formatter
+        return self.format_markdown_code_blocks(text)
+
     def format_markdown_code_blocks(self, text):
         # Detect code fences and wrap them in HTML for better readability
-        pattern = r'```(python)?(.*?)```'
+        pattern = r'```(.*?)\n(.*?)´´´'
         def replacer(match):
+            lang = match.group(1).strip()
             code_text = match.group(2).replace('<', '&lt;').replace('>', '&gt;')
-            if match.group(1):
+            if lang and lang.lower() == 'python':
                 # Python code
                 return f"<pre><code style='color: #0000AA;'>{code_text}</code></pre>"
             else:
                 # No specified language
                 return f"<pre><code>{code_text}</code></pre>"
-        return re.sub(pattern, replacer, text, flags=re.DOTALL)
+        
+        # Process code blocks
+        processed_text = re.sub(pattern, replacer, text, flags=re.DOTALL)
+        
+        # Process headers (# Header)
+        processed_text = re.sub(r'^#\s+(.+)$', r'<h1>\1</h1>', processed_text, flags=re.MULTILINE)
+        processed_text = re.sub(r'^##\s+(.+)$', r'<h2>\1</h2>', processed_text, flags=re.MULTILINE)
+        processed_text = re.sub(r'^###\s+(.+)$', r'<h3>\1</h3>', processed_text, flags=re.MULTILINE)
+        
+        # Process bullet lists
+        processed_text = re.sub(r'^\*\s+(.+)$', r'<li>\1</li>', processed_text, flags=re.MULTILINE)
+        processed_text = re.sub(r'^-\s+(.+)$', r'<li>\1</li>', processed_text, flags=re.MULTILINE)
+        
+        # Process numbered lists
+        processed_text = re.sub(r'^\d+\.\s+(.+)$', r'<li>\1</li>', processed_text, flags=re.MULTILINE)
+        
+        # Process bold (**text**)
+        processed_text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', processed_text)
+        
+        # Process italic (*text*)
+        processed_text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', processed_text)
+        
+        # Process links [text](url)
+        processed_text = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', processed_text)
+        
+        # Add paragraph breaks
+        processed_text = re.sub(r'\n\n+', r'<br><br>', processed_text)
+        
+        return processed_text
 
     def update_output(self, response):
         user_input = self.worker.user_input
-        formatted_response = self.format_markdown_code_blocks(response)
+        formatted_response = self.format_markdown(response)
         self.output_window.append(
             f"<span style='color: red; font-weight: bold;'>Human:</span> {user_input}<br><br>"
             f"<span style='color: blue; font-weight: bold;'>Assistant:</span> {formatted_response}<br>"
