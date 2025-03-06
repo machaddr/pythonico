@@ -307,7 +307,19 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         # Built-in functions format
         builtin_format = QtGui.QTextCharFormat()
         builtin_format.setForeground(QtGui.QColor("#8EC07C"))
-        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"), builtin_format)
+        
+        # Create a list of built-in function names
+        builtin_funcs = dir(__builtins__)
+        
+        # Add specific rules for built-in functions
+        for func in builtin_funcs:
+            if not keyword.iskeyword(func) and func[0] != '_':
+                self.add_rule(QtCore.QRegularExpression(r"\b" + func + r"\b"), builtin_format)
+        
+        # Also highlight general function calls with a different style
+        function_call_format = QtGui.QTextCharFormat()
+        function_call_format.setForeground(QtGui.QColor("#8EC07C"))
+        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"), function_call_format)
         
         # Store the import highlighting function
         self.highlight_imports_func = highlightImports
