@@ -958,8 +958,8 @@ class AboutDialog(QtWidgets.QDialog):
 
         about_text = """
             <h1><center>Pythonico</center></h1>
-            <p>Pythonico is a Simple Text Editor for Python Language</p>
-            <p>License: GNU GENERAL PUBLIC LICENSE Version 2</p>
+            <p>Programming Text Editor for Python Language with AI Models </p>
+            <p>License: GNU GENERAL PUBLIC LICENSE VERSION 2</p>
             <p>Version: 1.0</p>
             <p>Author: André Machado</p>
         """
@@ -1945,8 +1945,17 @@ class Pythonico(QtWidgets.QMainWindow):
 
             for index in range(self.tab_widget.count()):
                 editor = self.editors.get(index, self.editor)
+                # Check if the font is different from our default
+                current_font = editor.font()
+                if current_font.family() != "Monospace" or current_font.pointSize() != 11:
+                    # Font has been customized
+                    editor_font = current_font.toString()
+                else:
+                    # Font is still the default, explicitly set it to Monospace size 11
+                    editor_font = QtGui.QFont("Monospace", 11).toString()
+
                 editor_settings = {
-                    "editor_font": editor.font().toString(),
+                    "editor_font": editor_font,
                     "editor_theme": editor.styleSheet(),
                 }
                 session_data["editors_settings"].append(editor_settings)
@@ -1984,6 +1993,24 @@ class Pythonico(QtWidgets.QMainWindow):
                     current_index = self.tab_widget.currentIndex()
                     self.editors[current_index].setPlainText(text_file["content"])
 
+                # Helper function to parse font settings
+                def parse_font_string(font_str):
+                    font = QtGui.QFont()
+                    parts = font_str.split(',')
+                    
+                    if len(parts) >= 1:
+                        font.setFamily(parts[0])
+                    if len(parts) >= 2 and parts[1]:
+                        try:
+                            font.setPointSize(int(parts[1]))
+                        except ValueError:
+                            pass
+                    if len(parts) >= 3:
+                        font.setItalic('italic' in parts[2].lower())
+                        font.setBold('bold' in parts[2].lower())
+                    
+                    return font
+                
                 # Load editors settings
                 for index, settings in enumerate(session_data["editors_settings"]):
                     if index < self.tab_widget.count():
@@ -1991,7 +2018,7 @@ class Pythonico(QtWidgets.QMainWindow):
                         if editor_widget:
                             editor = editor_widget.findChild(QtWidgets.QPlainTextEdit)
                             if editor:
-                                editor.setFont(QtGui.QFont(settings["editor_font"]))
+                                editor.setFont(parse_font_string(settings["editor_font"]))
                                 editor.setStyleSheet(settings["editor_theme"])
 
                 # Load assistants settings
@@ -1999,12 +2026,12 @@ class Pythonico(QtWidgets.QMainWindow):
                 for index, settings in enumerate(session_data["assistants_settings"]):
                     if index < len(assistants):
                         assistant = assistants[index]
-                        assistant.output_window.setFont(QtGui.QFont(settings["assistant_font"]))
+                        assistant.output_window.setFont(parse_font_string(settings["assistant_font"]))
                         assistant.output_window.setStyleSheet(settings["assistant_theme"])
 
                 # Load terminal settings
                 terminal_settings = session_data["terminal_settings"]
-                self.terminal.setFont(QtGui.QFont(terminal_settings["terminal_font"]))
+                self.terminal.setFont(parse_font_string(terminal_settings["terminal_font"]))
                 self.terminal.setStyleSheet(terminal_settings["terminal_theme"])
                 
     def close_all_tabs(self):
