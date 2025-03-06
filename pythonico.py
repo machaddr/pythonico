@@ -312,16 +312,25 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         # Store the import highlighting function
         self.highlight_imports_func = highlightImports
             
-        # String format
-        string_format = QtGui.QTextCharFormat()
-        string_format.setForeground(QtGui.QColor("brown"))
-        self.add_rule(QtCore.QRegularExpression(r'".*?"'), string_format)
-        self.add_rule(QtCore.QRegularExpression(r"'.*?'"), string_format)
-
         # Comment format
         comment_format = QtGui.QTextCharFormat()
         comment_format.setForeground(QtGui.QColor("#717C7C"))
         self.add_rule(QtCore.QRegularExpression(r"#.*"), comment_format)
+        
+        # Triple-quoted string format
+        triple_string_format = QtGui.QTextCharFormat()
+        triple_string_format.setForeground(QtGui.QColor("#717C7C"))
+        # Handle triple double quotes
+        self.add_rule(QtCore.QRegularExpression(r'""".*?"""', QtCore.QRegularExpression.PatternOption.DotMatchesEverythingOption), triple_string_format)
+        # Handle triple single quotes
+        self.add_rule(QtCore.QRegularExpression(r"'''.*?'''", QtCore.QRegularExpression.PatternOption.DotMatchesEverythingOption), triple_string_format)
+
+        # String format (regular single and double quotes) - must come after triple quotes
+        string_format = QtGui.QTextCharFormat()
+        string_format.setForeground(QtGui.QColor("brown"))
+        # Make sure we don't match triple quotes with these patterns
+        self.add_rule(QtCore.QRegularExpression(r'(?<![""])"(?!").*?(?<![""])"'), string_format)
+        self.add_rule(QtCore.QRegularExpression(r"(?<![''])'(?!').*?(?<![''])'"), string_format)
 
         # Function definition format
         function_format = QtGui.QTextCharFormat()
