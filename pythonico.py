@@ -146,20 +146,33 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         self.microphone_button.setText("Mic")
         self.input_field.setPlaceholderText("")
         
-        # Call the callback function returned by listen_in_background
+        # First, stop the background listening and wait for it to complete
+        # This ensures the thread isn't still using the resources we're about to clean up
         if hasattr(self, 'stop_listening_callback'):
-            self.stop_listening_callback(wait_for_stop=False)
-            # Remove the reference
-            del self.stop_listening_callback
+            try:
+                # Wait for the callback to stop properly
+                self.stop_listening_callback(wait_for_stop=True)
+            except Exception:
+                pass
+            finally:
+                # Remove the reference
+                if hasattr(self, 'stop_listening_callback'):
+                    del self.stop_listening_callback
         
-        # Clean up microphone
+        # Give a short delay to ensure threads have stopped
+        QtCore.QThread.msleep(100)
+        
+        # Clean up microphone (which will also clean up its stream)
         if hasattr(self, 'microphone'):
             try:
                 self.microphone.__exit__(None, None, None)
-            except:
+            except Exception:
                 pass
+            finally:
+                if hasattr(self, 'microphone'):
+                    del self.microphone
         
-        # Clean up PyAudio
+        # Clean up PyAudio last, after all streams are closed
         if hasattr(self, 'audio'):
             try:
                 self.audio.terminate()
@@ -172,8 +185,10 @@ class ClaudeAIWidget(QtWidgets.QWidget):
                     "Make sure your microphone is connected and that the application "
                     "has permission to access it."
                 )
-            del self.audio
-            self.input_field.setPlaceholderText("")
+            finally:
+                if hasattr(self, 'audio'):
+                    del self.audio
+                self.input_field.setPlaceholderText("")
         
     def process_voice_input(self, recognizer, audio):
         try:
