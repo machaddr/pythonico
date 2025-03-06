@@ -45,7 +45,7 @@ Before installing Pythonico, make sure you have the following dependencies insta
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
 ```bash
-pip install PyQt6 anthropic pyqtconsole
+pip install PyQt6 anthropic pyaudio SpeechRecognition markdown pyqtconsole
 ```
 
 If you prefer there's other method, use your distro to install the listed dependencies for Pythonico in your package manager without `pip`.

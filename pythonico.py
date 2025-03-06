@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 import anthropic
-import os, sys, markdown, keyword, re, webbrowser, json, pkgutil
+import speech_recognition as sr
+import os, sys, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -60,7 +61,14 @@ class ClaudeAIWidget(QtWidgets.QWidget):
 
         self.input_field = QtWidgets.QLineEdit(self)
         input_layout.addWidget(self.input_field)
-
+        
+        # Add a microphone button to trigger voice input
+        self.microphone_button = QtWidgets.QPushButton("Mic", self)
+        self.microphone_button.clicked.connect(self.toggle_voice_input)
+        self.is_listening = False  # Flag to track voice input state
+        input_layout.addWidget(self.microphone_button)
+        
+        # Add a send button to send the input
         self.send_button = QtWidgets.QPushButton("Send", self)
         self.send_button.clicked.connect(self.send_request)
         input_layout.addWidget(self.send_button)
@@ -92,6 +100,90 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             self.markdown_module = markdown
         except ImportError:
             self.markdown_module = None
+            
+    def toggle_voice_input(self):
+        if self.is_listening:
+            self.stop_listening()
+        else:
+            self.start_listening()
+            
+    def start_listening(self):
+        self.is_listening = True
+        self.microphone_button.setStyleSheet("background-color: red;")
+        self.microphone_button.setText("Stop")
+        self.input_field.setPlaceholderText("Listening...")
+        
+        try:
+            # Initialize PyAudio explicitly first
+            self.audio = pyaudio.PyAudio()
+            
+            # Start listening for voice input
+            self.recognizer = sr.Recognizer()
+            self.microphone = sr.Microphone()
+            
+            # Set up listening in background
+            self.stop_listening_callback = self.recognizer.listen_in_background(
+                self.microphone, self.process_voice_input)
+                
+        except Exception as e:
+            self.is_listening = False
+            self.microphone_button.setStyleSheet("")
+            self.microphone_button.setText("Mic")
+            self.input_field.setPlaceholderText("")
+            
+            # Show error message
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Microphone Error", 
+                f"Could not initialize microphone: {str(e)}\n\n"
+                "Make sure your microphone is connected and that the application "
+                "has permission to access it."
+            )
+            
+    def stop_listening(self):
+        self.is_listening = False
+        self.microphone_button.setStyleSheet("")
+        self.microphone_button.setText("Mic")
+        self.input_field.setPlaceholderText("")
+        
+        # Call the callback function returned by listen_in_background
+        if hasattr(self, 'stop_listening_callback'):
+            self.stop_listening_callback(wait_for_stop=False)
+            # Remove the reference
+            del self.stop_listening_callback
+        
+        # Clean up microphone
+        if hasattr(self, 'microphone'):
+            try:
+                self.microphone.__exit__(None, None, None)
+            except:
+                pass
+        
+        # Clean up PyAudio
+        if hasattr(self, 'audio'):
+            try:
+                self.audio.terminate()
+            except Exception as e:
+                # Show error message only if termination fails
+                QtWidgets.QMessageBox.warning(
+                    self, 
+                    "Microphone Error", 
+                    f"Could not properly close microphone: {str(e)}\n\n"
+                    "Make sure your microphone is connected and that the application "
+                    "has permission to access it."
+                )
+            del self.audio
+            self.input_field.setPlaceholderText("")
+        
+    def process_voice_input(self, recognizer, audio):
+        try:
+            user_input = recognizer.recognize_google(audio)
+            self.input_field.setText(user_input)
+            self.send_request()
+        except sr.UnknownValueError:
+            pass
+        except sr.RequestError:
+            pass        
 
     def send_request(self):
         user_input = str(self.input_field.text())
