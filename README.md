@@ -1,5 +1,5 @@
 <div align="center">
-  <h2>Pythonico Programming Text Editor</h2>
+  <h2>Pythonico Programming Text Editor (IDE) for Python Language</h2>
 </div>
 
 <p align="center">
@@ -8,30 +8,27 @@
 
 ![Pythonico Programming Text Editor](https://raw.githubusercontent.com/machaddr/pythonico/main/screenshots/editor.png)
 
-Pythonico Programming Text Editor is a lightweight and customizable text editor designed specifically for programming in Python.
-
-This portion of code provides a user-friendly interface and essential features to facilitate Python programming. <br />It offers syntax highlighting, code auto-completion, code snippets, multiple tabs, and other functionalities to enhance the coding experience. <br /><br />The goal of Pythonico Programming Text Editor is to provide a fast and efficient text editor tailored for Python developers.
-
-This code is still in Alpha, many features may lack in the code.
+Pythonico Programming Text Editor is a lightweight and customizable IDE built specifically for Python development. It provides a user-friendly interface and essential features like syntax highlighting, code auto-completion, code snippets, and multiple tabs to streamline your coding experience. Our goal is to offer a fast, efficient, and intuitive editor tailored for Python developers. This code is still in Alpha, and several features may be incomplete or under active development.
 
 ## Features
 - **Syntax Highlighting:** 
-Provides syntax highlighting for Python code to improve code readability.
+  Provides rich syntax highlighting for Python code, including advanced rules for parentheses, imports, and strings.
 - **Code Auto-Completion:** 
-Offers auto-completion suggestions while typing to increase productivity.
+  Offers auto-completion suggestions for built-in Python functions and installed modules, boosting productivity.
 - TODO **Code Snippets:** 
-Includes a library of code snippets for common Python programming tasks.
+  Includes a library of code snippets for common Python programming tasks.
 - **Multiple Tabs:** 
-Allows opening multiple files simultaneously with a tabbed interface.
+  Allows opening multiple files simultaneously with a tabbed interface.
+- **Line Numbering & Auto-Indentation:** 
+  Displays line numbers for easy navigation and automatically indents your code.
 - **Customization:** 
-Provides options to customize the appearance and behavior of the text editor.
+  Provides options to customize the appearance and behavior of the text editor, including theming and font selection.
 - **Search and Replace:** 
-Enables searching for specific text patterns and replacing them as needed.
+  Enables searching for text patterns and replacing them as needed.
 - **Code Formatting:** 
-Offers automatic code formatting for consistent and clean code.
+  Offers automatic code formatting for consistent and clean code.
 - TODO **Error Highlighting:** 
-Highlights syntax errors and warnings in the code for easy identification.
-Installation
+  Helps identify syntax errors and warnings in the code for quick troubleshooting.
 
 ## Dependencies
 
@@ -40,7 +37,10 @@ Before installing Pythonico, make sure you have the following dependencies insta
 - [Python 3.6 or above](https://www.python.org/downloads/)
 - [PyQt6](https://pypi.org/project/PyQt6/)
 - [Anthropic](https://pypi.org/project/anthropic/)
-- [PyQTConsole](https://pypi.org/project/pyqtconsole/)
+- [PyAudio](https://pypi.org/project/PyAudio/)
+- [SpeechRecognition](https://pypi.org/project/SpeechRecognition/)
+- [markdown](https://pypi.org/project/markdown/)
+- [pyqtconsole](https://pypi.org/project/pyqtconsole/)
 
 You can install these dependencies using `pip`, the Python package installer. Open a terminal or command prompt and run the following commands:
 
