@@ -24,7 +24,7 @@ class ClaudeAIWorker(QtCore.QThread):
                 messages=[
                     {"role": "user", "content": self.user_input}
                 ],
-                max_tokens=2048,
+                max_tokens=4096,
                 temperature=0.7
             )
             self.response_received.emit(response.content[0].text)
