@@ -113,6 +113,12 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         self.microphone_button.setText("Stop")
         self.input_field.setPlaceholderText("Listening...")
         
+        # Create a timer to stop listening after silence
+        self.silence_timer = QtCore.QTimer(self)
+        self.silence_timer.setInterval(5000)  # 5 seconds
+        self.silence_timer.setSingleShot(True)
+        self.silence_timer.timeout.connect(self.stop_listening)
+        
         try:
             # Initialize PyAudio explicitly first
             self.audio = pyaudio.PyAudio()
@@ -124,6 +130,9 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             # Set up listening in background
             self.stop_listening_callback = self.recognizer.listen_in_background(
                 self.microphone, self.process_voice_input)
+            
+            # Start the silence timer
+            self.silence_timer.start()
                 
         except Exception as e:
             self.is_listening = False
@@ -131,14 +140,18 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             self.microphone_button.setText("Mic")
             self.input_field.setPlaceholderText("")
             
-            # Show error message
-            QtWidgets.QMessageBox.warning(
-                self, 
-                "Microphone Error", 
-                f"Could not initialize microphone: {str(e)}\n\n"
-                "Make sure your microphone is connected and that the application "
-                "has permission to access it."
-            )
+    def stop_listening(self):
+        self.is_listening = False
+        self.microphone_button.setStyleSheet("")
+        self.microphone_button.setText("Mic")
+        self.input_field.setPlaceholderText("")
+        
+        # Stop the silence timer if it exists and is active
+        if hasattr(self, 'silence_timer') and self.silence_timer.isActive():
+            self.silence_timer.stop()
+        
+        # First, stop the background listening and wait for it to complete
+        # This ensures the thread isn't still using the resources we're about to clean up
             
     def stop_listening(self):
         self.is_listening = False
@@ -177,18 +190,29 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             try:
                 self.audio.terminate()
             except Exception as e:
-                # Show error message only if termination fails
-                QtWidgets.QMessageBox.warning(
-                    self, 
-                    "Microphone Error", 
-                    f"Could not properly close microphone: {str(e)}\n\n"
-                    "Make sure your microphone is connected and that the application "
-                    "has permission to access it."
-                )
+                pass
             finally:
                 if hasattr(self, 'audio'):
                     del self.audio
-                self.input_field.setPlaceholderText("")
+     
+    def process_voice_input(self, recognizer, audio):
+        try:
+            user_input = recognizer.recognize_google(audio)
+            self.input_field.setText(user_input)
+            self.send_request()
+            # Voice input was detected, reset the silence timer
+            if hasattr(self, 'silence_timer'):
+                self.silence_timer.start()
+        except sr.UnknownValueError:
+            # Reset the silence timer even when nothing is recognized
+            # This gives more time when user is thinking
+            if hasattr(self, 'silence_timer'):
+                self.silence_timer.start()
+        except sr.RequestError:
+            pass
+            if hasattr(self, 'audio'):
+                del self.audio
+            self.input_field.setPlaceholderText("")
         
     def process_voice_input(self, recognizer, audio):
         try:
