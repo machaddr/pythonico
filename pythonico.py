@@ -627,6 +627,8 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
             # Match import statements
             import_pattern = re.compile(r"\bimport\s+([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)")
             from_import_pattern = re.compile(r"\bfrom\s+([a-zA-Z_]\w*)\s+import\b")
+            # New pattern to match the imported names in from...import statement
+            from_import_names_pattern = re.compile(r"\bfrom\s+([a-zA-Z_]\w*)\s+import\s+([a-zA-Z_*]\w*(?:\s*,\s*[a-zA-Z_*]\w*)*)")
             
             # Check if modules exist
             for match in import_pattern.finditer(text):
@@ -652,7 +654,7 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
                             error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
                             self.setFormat(module_start, len(module), error_format)
             
-            # Check from ... import statements
+            # Check from ... import statements for module existence
             for match in from_import_pattern.finditer(text):
                 module = match.group(1)
                 try:
@@ -662,7 +664,48 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
                     error_format = QtGui.QTextCharFormat()
                     error_format.setForeground(QtGui.QColor("red"))
                     error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
-                    self.setFormat(match.start(), match.end() - match.start(), error_format)
+                    self.setFormat(match.start(1), len(module), error_format)
+            
+            # Check imported names in from ... import name1, name2 statements
+            for match in from_import_names_pattern.finditer(text):
+                module_name = match.group(1)
+                import_names = match.group(2)
+                names_list = [name.strip() for name in import_names.split(',')]
+                
+                # Try to import the module
+                try:
+                    module = __import__(module_name)
+                    
+                    # For submodules, we need to get the right module object
+                    components = module_name.split('.')
+                    for comp in components[1:]:
+                        module = getattr(module, comp)
+                    
+                    # Find position of each imported name and verify it exists
+                    current_pos = match.start(2)
+                    
+                    for name in names_list:
+                        # Handle wildcard imports
+                        if name == '*':
+                            continue
+                            
+                        # Find exact location of this name in the import statement
+                        name_start = text.find(name, current_pos)
+                        current_pos = name_start + len(name)
+                        
+                        # Check if the name exists in the module
+                        if not hasattr(module, name):
+                            error_format = QtGui.QTextCharFormat()
+                            error_format.setForeground(QtGui.QColor("red"))
+                            error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
+                            self.setFormat(name_start, len(name), error_format)
+                            
+                except ImportError:
+                    # If module doesn't exist, we've already marked it in the previous loop
+                    pass
+                except AttributeError:
+                    # This can happen with complex imports
+                    pass
         except Exception:
             # Silently ignore errors in import highlighting
             pass
