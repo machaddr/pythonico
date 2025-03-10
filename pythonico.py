@@ -326,13 +326,26 @@ class LineCountWidget(QtWidgets.QTextEdit):
         self.editor = editor
         self.setReadOnly(True)
 
-        font = QtGui.QFont("Monospace", 11)
-        self.setFont(font)
-
+        # Set the fixed width of the line count widget
+        self.setFixedWidth(40)
+        
+        # Store the current font for comparison
+        self.current_font = editor.font()
+        
+        # Set the same font as the editor
+        self.setFont(self.current_font)
+        
+        # Set the background color to match the editor
+        self.setStyleSheet("background-color: #f0f0f0;")
+        
+        # Disable scroll bars
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.setStyleSheet("background-color: lightgray;")
+        
+        # Center the text in the widget
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         # Connect textChanged signal to update the line count
         self.editor.textChanged.connect(self.update_line_count)
@@ -341,11 +354,31 @@ class LineCountWidget(QtWidgets.QTextEdit):
         self.editor.verticalScrollBar().valueChanged.connect(self.update_line_count)
 
         self.editor.cursorPositionChanged.connect(self.update_line_count)
-
-        # Initial update of line count
+        
+        # Connect to textChanged to check for font changes
+        self.editor.textChanged.connect(self.check_font_changes)
+        
+        # Make sure font is properly synchronized at startup
+        QtCore.QTimer.singleShot(0, self.sync_font_with_editor)
+        
+    def check_font_changes(self):
+        """Check if the editor font has changed and update if needed"""
+        if self.current_font != self.editor.font():
+            self.current_font = self.editor.font()
+            self.setFont(self.current_font)
+            self.update_line_count()
+            
+    def sync_font_with_editor(self):
+        """Synchronize the font with the editor's font"""
+        self.setFont(self.editor.font())
+        self.current_font = self.editor.font()
         self.update_line_count()
-
+        
     def update_line_count(self):
+        # Ensure font is in sync before calculations
+        if self.font() != self.editor.font():
+            self.setFont(self.editor.font())
+            
         # Get the total number of lines in the editor
         total_lines = self.editor.blockCount()
 
@@ -353,8 +386,9 @@ class LineCountWidget(QtWidgets.QTextEdit):
         first_visible_block = self.editor.firstVisibleBlock()
         first_visible_line = first_visible_block.blockNumber()
 
-        # Get the number of visible lines
-        visible_lines = self.editor.viewport().height() // self.editor.fontMetrics().height()
+        # Get the number of visible lines using editor metrics for consistency
+        editor_line_height = self.editor.fontMetrics().height()
+        visible_lines = self.editor.viewport().height() // editor_line_height
 
         # Calculate the maximum line number width
         max_line_number_width = len(str(total_lines))
@@ -363,12 +397,14 @@ class LineCountWidget(QtWidgets.QTextEdit):
         lines = ""
         for line_number in range(first_visible_line + 1, first_visible_line + visible_lines + 1):
             if line_number <= total_lines:
-                lines += str(line_number).rjust(max_line_number_width) + "\n"
+                # Use centered line numbers
+                lines += f"{line_number}\n"
 
         self.setPlainText(lines)
 
         # Adjust the width of the LineCountWidget based on the maximum line number width
-        line_number_width = self.fontMetrics().horizontalAdvance("9" * max_line_number_width)
+        # Add extra space for better readability
+        line_number_width = self.fontMetrics().horizontalAdvance("9" * max_line_number_width) + 10
         self.setFixedWidth(line_number_width + 10)
 
 class AutoIndentFilter(QtCore.QObject):
@@ -1797,18 +1833,26 @@ class Pythonico(QtWidgets.QMainWindow):
                     f"The maximum number of lines is {max_lines}.")
             else:
                 cursor = current_editor.textCursor()
-                cursor.setPosition(
-                    current_editor.document().findBlockByLineNumber(line - 1). \
-                    position())
+                cursor.setPosition(0)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.NextBlock,
+                    QtGui.QTextCursor.MoveMode.MoveAnchor, line - 1)
                 current_editor.setTextCursor(cursor)
-
-                # Indentation adjustment
-                cursor.movePosition(QtGui.QTextCursor.MoveOperation.StartOfLine)
-                indent = len(cursor.block().text()) - len(cursor.block(). \
-                    text().lstrip())
-                cursor.movePosition(QtGui.QTextCursor.MoveOperation.Right,
-                    QtGui.QTextCursor.MoveMode.MoveAnchor, indent)
-                current_editor.setTextCursor(cursor)
+                current_editor.setFocus()
+                    
+    def editor_font_dialog(self):
+        font, ok = QtWidgets.QFontDialog.getFont()
+        if ok:
+            current_index = self.tab_widget.currentIndex()
+            current_editor = self.editors.get(current_index, self.editor)
+            current_editor.setFont(font)
+            
+            # Font changes in the editor will automatically update the LineCountWidget
+            # through the sync_font_with_editor method
+            
+            # Also manually trigger an update for immediate visual feedback
+            line_count_widget = current_editor.parentWidget().findChild(LineCountWidget)
+            if line_count_widget:
+                line_count_widget.sync_font_with_editor()
         else:
             self.showMessageBox("Go to Line canceled.")
             
