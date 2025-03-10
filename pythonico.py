@@ -397,8 +397,8 @@ class LineCountWidget(QtWidgets.QTextEdit):
         lines = ""
         for line_number in range(first_visible_line + 1, first_visible_line + visible_lines + 1):
             if line_number <= total_lines:
-                # Use centered line numbers
-                lines += f"{line_number}\n"
+                # Add a space before the line number for better centering
+                lines += f" {line_number}\n"
 
         self.setPlainText(lines)
 
