@@ -674,36 +674,177 @@ class CodeAutoCompleter(QtWidgets.QCompleter):
         self.setCompletionMode(QtWidgets.QCompleter.CompletionMode.PopupCompletion)
         self.setWrapAround(False)
         self.activated.connect(self.insertCompletion)
+        
+        # Cache for module contents
+        self.module_cache = {}
+        
+        # Initialize with built-ins and common modules
+        self.updateCompletionList()
+        
+        # Set popup styling
+        self.popup().setStyleSheet("""
+            QListView {
+                background-color: #2E3440;
+                color: #D8DEE9;
+                border: 1px solid #4C566A;
+                font-family: monospace;
+            }
+            QListView::item:selected {
+                background-color: #5E81AC;
+                color: #ECEFF4;
+            }
+        """)
 
-        # Gather built-in functions and installed modules
-        builtins_list = sorted(dir(__builtins__))
+    def updateCompletionList(self):
+        """Update the completion list with builtins and modules"""
+        # Gather built-in functions and keywords
+        builtins_list = sorted([f for f in dir(__builtins__) if not f.startswith('_')])
+        keyword_list = sorted(keyword.kwlist)
+        
+        # Get standard library modules
         modules_list = sorted([m.name for m in pkgutil.iter_modules()])
-
-        all_symbols = builtins_list + modules_list
-
-        # Create a model with all discovered symbols
-        self.setModel(QtCore.QStringListModel(all_symbols))
-        self.popup().setStyleSheet("background-color: #657B83; color: white;")
+        
+        # Create categorized completion items
+        completions = []
+        
+        # Add keywords with category prefix for potential icon display
+        for kw in keyword_list:
+            completions.append(f"keyword:{kw}")
+            
+        # Add builtins with category prefix
+        for func in builtins_list:
+            completions.append(f"builtin:{func}")
+            
+        # Add modules with category prefix
+        for mod in modules_list:
+            completions.append(f"module:{mod}")
+        
+        # Store raw versions for direct insertion
+        self.raw_completions = {}
+        for item in completions:
+            category, value = item.split(':', 1)
+            self.raw_completions[item] = value
+            
+        # Set the model with all categories included
+        self.setModel(QtCore.QStringListModel(completions))
 
     def setCompletionPrefix(self, prefix):
-        super().setCompletionPrefix(prefix)
+        """Set the completion prefix and update context-sensitive completions"""
+        if not prefix or len(prefix) < 2:
+            return
+            
+        widget = self.widget()
+        if widget is None:
+            return
+            
+        # Get the text context
+        cursor = widget.textCursor()
+        text = widget.toPlainText()
+        pos = cursor.position()
+        
+        # Check for module completion context (after import or from statements)
+        line_start = text.rfind('\n', 0, pos) + 1
+        current_line = text[line_start:pos].strip()
+        
+        # Basic context detection
+        if '.' in prefix:
+            # Handle attribute access (module.something)
+            module_name, partial_attr = prefix.rsplit('.', 1)
+            
+            # Try to get module attributes for completion
+            self.updateModuleCompletions(module_name, partial_attr)
+            super().setCompletionPrefix(partial_attr)
+        else:
+            # Default completion behavior
+            # Extract local variables from current document for better context
+            local_vars = self.extractLocalVariables(text)
+            
+            # Create a new model with local variables included
+            completions = local_vars + [c for c in self.model().stringList() 
+                                       if not c.startswith("var:")]
+            
+            self.setModel(QtCore.QStringListModel(completions))
+            super().setCompletionPrefix(prefix)
+        
+        # Ensure the popup starts at the first match
         popup = self.popup()
-        popup.setStyleSheet("background-color: #657B83; color: white;")
         popup.setCurrentIndex(self.completionModel().index(0, 0))
 
-    def setCompletionPrefix(self, prefix):
-        super().setCompletionPrefix(prefix)
-        popup = self.popup()
-        popup.setStyleSheet("background-color: #657B83; color: white;")
-        popup.setCurrentIndex(self.completionModel().index(0, 0))
+    def updateModuleCompletions(self, module_name, prefix):
+        """Update completion list with module attributes"""
+        try:
+            # Check if we've already cached this module's attributes
+            if module_name not in self.module_cache:
+                # Try to import the module and get its attributes
+                module = __import__(module_name, fromlist=['*'])
+                attrs = dir(module)
+                
+                # Create categorized completions for this module
+                module_completions = []
+                for attr in sorted(attrs):
+                    if attr.startswith('_'):
+                        continue
+                        
+                    # Add category based on attribute type
+                    if callable(getattr(module, attr)):
+                        module_completions.append(f"function:{attr}")
+                    elif isinstance(getattr(module, attr), type):
+                        module_completions.append(f"class:{attr}")
+                    else:
+                        module_completions.append(f"attribute:{attr}")
+                        
+                self.module_cache[module_name] = module_completions
+                
+            # Set model to the cached completions for this module
+            self.setModel(QtCore.QStringListModel(self.module_cache[module_name]))
+                
+        except (ImportError, AttributeError):
+            # If module import fails, use default completions
+            pass
+
+    def extractLocalVariables(self, text):
+        """Extract local variable names from the document text"""
+        # Simple regex to find variable assignments
+        var_pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*=\s*')
+        matches = var_pattern.finditer(text)
+        
+        # Create list of variable completions
+        vars_list = []
+        seen = set()
+        for match in matches:
+            var_name = match.group(1)
+            if var_name not in seen and not keyword.iskeyword(var_name):
+                vars_list.append(f"var:{var_name}")
+                seen.add(var_name)
+                
+        return sorted(vars_list)
 
     def insertCompletion(self, completion):
-        if self.widget() is not None:
-            cursor = self.widget().textCursor()
+        """Insert the raw completion text without category prefix"""
+        if self.widget() is None:
+            return
+            
+        # Extract the raw completion text without category
+        if ':' in completion:
+            raw_completion = self.raw_completions.get(completion, completion)
+        else:
+            # For locally extracted completions that don't have a cached raw version
+            raw_completion = completion.split(':', 1)[1] if ':' in completion else completion
+            
+        cursor = self.widget().textCursor()
+        prefix_len = len(self.completionPrefix())
+        
+        # If completing after a dot, only remove the partial attribute name
+        if '.' in cursor.block().text()[:cursor.positionInBlock()]:
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Left, 
+                               QtGui.QTextCursor.MoveMode.KeepAnchor, 
+                               prefix_len)
+        else:
             cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
-            cursor.removeSelectedText()
-            cursor.insertText(completion)
-            self.widget().setTextCursor(cursor)
+            
+        cursor.removeSelectedText()
+        cursor.insertText(raw_completion)
+        self.widget().setTextCursor(cursor)
     
 class AboutLicenseDialog(QtWidgets.QDialog):
     def __init__(self):
