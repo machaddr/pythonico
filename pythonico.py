@@ -62,6 +62,32 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         self.input_field = QtWidgets.QLineEdit(self)
         input_layout.addWidget(self.input_field)
         
+        # Add language selector for speech recognition
+        self.language_selector = QtWidgets.QComboBox(self)
+        self.language_selector.addItems([
+            "English (en-US)",
+            "English (en-GB)",
+            "Arabic (ar-SA)",
+            "Chinese (zh-CN)",
+            "Danish (da-DK)",
+            "Dutch (nl-NL)",
+            "Finnish (fi-FI)",
+            "French (fr-FR)",
+            "German (de-DE)",
+            "Italian (it-IT)",
+            "Japanese (ja-JP)",
+            "Korean (ko-KR)",
+            "Norwegian (nb-NO)",
+            "Portuguese (pt-BR)",
+            "Portuguese (pt-PT)",
+            "Spanish (es-ES)",
+            "Swedish (sv-SE)",
+            "Ukrainian (uk-UA)"
+        ])
+        self.language_selector.setToolTip("Select speech recognition language")
+        self.language_selector.setMaximumWidth(120)
+        input_layout.addWidget(self.language_selector)
+        
         # Add a microphone button to trigger voice input
         self.microphone_button = QtWidgets.QPushButton("Mic", self)
         self.microphone_button.clicked.connect(self.toggle_voice_input)
@@ -169,45 +195,22 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         # Clean up microphone (which will also clean up its stream)
         if hasattr(self, 'microphone'):
             try:
-                self.microphone.__exit__(None, None, None)
-            except Exception:
-                pass
-            finally:
-                if hasattr(self, 'microphone'):
-                    del self.microphone
-        
-        # Clean up PyAudio last, after all streams are closed
-        if hasattr(self, 'audio'):
-            try:
-                self.audio.terminate()
+                # Check if the microphone has a stream attribute and it's not None
+                if hasattr(self.microphone, 'stream') and self.microphone.stream is not None:
+                    self.microphone.__exit__(None, None, None)
             except Exception as e:
-                pass
+                print(f"Error closing microphone: {e}")
             finally:
-                if hasattr(self, 'audio'):
-                    del self.audio
-     
-    def process_voice_input(self, recognizer, audio):
-        try:
-            user_input = recognizer.recognize_google(audio)
-            self.input_field.setText(user_input)
-            self.send_request()
-            # Voice input was detected, reset the silence timer
-            if hasattr(self, 'silence_timer'):
-                self.silence_timer.start()
-        except sr.UnknownValueError:
-            # Reset the silence timer even when nothing is recognized
-            if hasattr(self, 'silence_timer'):
-                self.silence_timer.start()
-        except sr.RequestError:
-            self.input_field.setPlaceholderText("Network error, try again")
-            QtCore.QTimer.singleShot(2000, self.stop_listening)
-        except Exception as e:
-            self.input_field.setPlaceholderText(f"Error: {str(e)[:20]}")
-            QtCore.QTimer.singleShot(2000, self.stop_listening)
+                # Always delete the microphone reference
+                del self.microphone
             
     def process_voice_input(self, recognizer, audio):
         try:
-            user_input = recognizer.recognize_google(audio)
+            # Get the selected language code from the combobox
+            selected_language = self.language_selector.currentText()
+            language_code = selected_language.split('(')[1].strip(')')
+            
+            user_input = recognizer.recognize_google(audio, language=language_code)
             if user_input:
                 self.input_field.setText(user_input)
                 # Only send if we detected actual text
@@ -222,7 +225,7 @@ class ClaudeAIWidget(QtWidgets.QWidget):
                 # Increase timeout to 10 seconds for longer speaking time
                 self.silence_timer.setInterval(10000)  
                 self.silence_timer.start()
-                
+                      
         except sr.UnknownValueError:
             # Reset the silence timer even when nothing is recognized
             # This gives more time when user is thinking
@@ -235,7 +238,11 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         except Exception as e:
             # Generic error handler
             self.input_field.setPlaceholderText(f"Error: {str(e)[:20]}")
-            QtCore.QTimer.singleShot(2000, self.stop_listening)
+            QtCore.QTimer.singleShot(2000, self.stop_listening)            
+            if hasattr(self, 'silence_timer'):
+                # Increase timeout to 10 seconds for longer speaking time
+                self.silence_timer.setInterval(10000)  
+                self.silence_timer.start()
             
     def send_request(self):
         user_input = str(self.input_field.text())
