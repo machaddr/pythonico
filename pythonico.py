@@ -115,7 +115,7 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         
         # Create a timer to stop listening after silence
         self.silence_timer = QtCore.QTimer(self)
-        self.silence_timer.setInterval(5000)  # 5 seconds
+        self.silence_timer.setInterval(10000)  # 10 seconds for longer inputs
         self.silence_timer.setSingleShot(True)
         self.silence_timer.timeout.connect(self.stop_listening)
         
@@ -149,15 +149,6 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         # Stop the silence timer if it exists and is active
         if hasattr(self, 'silence_timer') and self.silence_timer.isActive():
             self.silence_timer.stop()
-        
-        # First, stop the background listening and wait for it to complete
-        # This ensures the thread isn't still using the resources we're about to clean up
-            
-    def stop_listening(self):
-        self.is_listening = False
-        self.microphone_button.setStyleSheet("")
-        self.microphone_button.setText("Mic")
-        self.input_field.setPlaceholderText("")
         
         # First, stop the background listening and wait for it to complete
         # This ensures the thread isn't still using the resources we're about to clean up
@@ -205,25 +196,47 @@ class ClaudeAIWidget(QtWidgets.QWidget):
                 self.silence_timer.start()
         except sr.UnknownValueError:
             # Reset the silence timer even when nothing is recognized
+            if hasattr(self, 'silence_timer'):
+                self.silence_timer.start()
+        except sr.RequestError:
+            self.input_field.setPlaceholderText("Network error, try again")
+            QtCore.QTimer.singleShot(2000, self.stop_listening)
+        except Exception as e:
+            self.input_field.setPlaceholderText(f"Error: {str(e)[:20]}")
+            QtCore.QTimer.singleShot(2000, self.stop_listening)
+            
+    def process_voice_input(self, recognizer, audio):
+        try:
+            user_input = recognizer.recognize_google(audio)
+            if user_input:
+                self.input_field.setText(user_input)
+                # Only send if we detected actual text
+                if len(user_input.strip()) > 0:
+                    self.send_request()
+                    # After sending, wait a bit before stopping
+                    QtCore.QTimer.singleShot(500, self.stop_listening)
+                    return
+            
+            # Voice input was detected, reset the silence timer to continue listening
+            if hasattr(self, 'silence_timer'):
+                # Increase timeout to 10 seconds for longer speaking time
+                self.silence_timer.setInterval(10000)  
+                self.silence_timer.start()
+                
+        except sr.UnknownValueError:
+            # Reset the silence timer even when nothing is recognized
             # This gives more time when user is thinking
             if hasattr(self, 'silence_timer'):
                 self.silence_timer.start()
         except sr.RequestError:
-            pass
-            if hasattr(self, 'audio'):
-                del self.audio
-            self.input_field.setPlaceholderText("")
-        
-    def process_voice_input(self, recognizer, audio):
-        try:
-            user_input = recognizer.recognize_google(audio)
-            self.input_field.setText(user_input)
-            self.send_request()
-        except sr.UnknownValueError:
-            pass
-        except sr.RequestError:
-            pass        
-
+            # Handle network errors more gracefully
+            self.input_field.setPlaceholderText("Network error, try again")
+            QtCore.QTimer.singleShot(2000, self.stop_listening)
+        except Exception as e:
+            # Generic error handler
+            self.input_field.setPlaceholderText(f"Error: {str(e)[:20]}")
+            QtCore.QTimer.singleShot(2000, self.stop_listening)
+            
     def send_request(self):
         user_input = str(self.input_field.text())
         if user_input.strip() == "/clear":
