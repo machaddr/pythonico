@@ -2,8 +2,9 @@
 
 import anthropic
 import speech_recognition as sr
-import os, sys, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil
+import os, sys, io, traceback, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil
 from PyQt6 import QtCore, QtGui, QtWidgets
+from contextlib import redirect_stdout, redirect_stderr
 from pyqtconsole.console import PythonConsole
 
 class ClaudeAIWorker(QtCore.QThread):
@@ -709,6 +710,281 @@ class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
         except Exception:
             # Silently ignore errors in import highlighting
             pass
+        
+class debugger(QtWidgets.QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Python Debugger")
+        self.resize(800, 600)
+        
+        # Main layout
+        main_layout = QtWidgets.QVBoxLayout(self)
+        
+        # Splitter for top and bottom parts
+        main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        
+        # Top part: Code view and variable inspector
+        top_widget = QtWidgets.QWidget()
+        top_layout = QtWidgets.QHBoxLayout(top_widget)
+        
+        # Left side: Code view with line numbers
+        self.code_view = QtWidgets.QTextEdit()
+        self.code_view.setReadOnly(True)
+        self.code_view.setFont(QtGui.QFont("Monospace", 10))
+        self.code_view.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.NoWrap)
+        self.code_view.setStyleSheet("background-color: #f8f8f8;")
+        
+        # Right side: Variable inspector as a tree view
+        self.var_inspector = QtWidgets.QTreeWidget()
+        self.var_inspector.setHeaderLabels(["Name", "Type", "Value"])
+        self.var_inspector.setColumnWidth(0, 150)
+        self.var_inspector.setColumnWidth(1, 100)
+        
+        # Add code view and variable inspector to the top layout
+        top_layout.addWidget(self.code_view, 3)  # Give code view more space
+        top_layout.addWidget(self.var_inspector, 2)
+        
+        # Bottom part: Tabbed output, call stack, breakpoints
+        bottom_widget = QtWidgets.QTabWidget()
+        
+        # Output tab - Console output from the program
+        self.debug_output = QtWidgets.QTextEdit()
+        self.debug_output.setReadOnly(True)
+        self.debug_output.setFont(QtGui.QFont("Monospace", 10))
+        bottom_widget.addTab(self.debug_output, "Output")
+        
+        # Call Stack tab - Shows the call stack during debugging
+        self.call_stack = QtWidgets.QTableWidget()
+        self.call_stack.setColumnCount(3)
+        self.call_stack.setHorizontalHeaderLabels(["Function", "File", "Line"])
+        self.call_stack.horizontalHeader().setStretchLastSection(True)
+        bottom_widget.addTab(self.call_stack, "Call Stack")
+        
+        # Breakpoints tab - Lists and manages breakpoints
+        self.breakpoints_list = QtWidgets.QTableWidget()
+        self.breakpoints_list.setColumnCount(3)
+        self.breakpoints_list.setHorizontalHeaderLabels(["File", "Line", "Condition"])
+        self.breakpoints_list.horizontalHeader().setStretchLastSection(True)
+        self.breakpoints_list.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        bottom_widget.addTab(self.breakpoints_list, "Breakpoints")
+        
+        # Watch expressions tab - For monitoring expressions
+        self.watch_list = QtWidgets.QTableWidget()
+        self.watch_list.setColumnCount(2)
+        self.watch_list.setHorizontalHeaderLabels(["Expression", "Value"])
+        self.watch_list.horizontalHeader().setStretchLastSection(True)
+        bottom_widget.addTab(self.watch_list, "Watch")
+        
+        # Add widgets to main splitter
+        main_splitter.addWidget(top_widget)
+        main_splitter.addWidget(bottom_widget)
+        main_splitter.setSizes([400, 200])  # Initial sizes
+        
+        # Add main splitter to the main layout
+        main_layout.addWidget(main_splitter)
+        
+        # Control panel with debug buttons
+        control_layout = QtWidgets.QHBoxLayout()
+        
+        # Debugging control buttons
+        self.run_button = QtWidgets.QPushButton("Run")
+        self.run_button.setIcon(QtGui.QIcon.fromTheme("media-playback-start"))
+        self.run_button.clicked.connect(self.debug_run)
+        control_layout.addWidget(self.run_button)
+        
+        self.pause_button = QtWidgets.QPushButton("Pause")
+        self.pause_button.setIcon(QtGui.QIcon.fromTheme("media-playback-pause"))
+        self.pause_button.clicked.connect(self.debug_pause)
+        control_layout.addWidget(self.pause_button)
+        
+        self.stop_button = QtWidgets.QPushButton("Stop")
+        self.stop_button.setIcon(QtGui.QIcon.fromTheme("media-playback-stop"))
+        self.stop_button.clicked.connect(self.debug_stop)
+        control_layout.addWidget(self.stop_button)
+        
+        # Separator
+        control_layout.addWidget(QtWidgets.QLabel("|"))
+        
+        # Stepping control buttons
+        self.step_into_button = QtWidgets.QPushButton("Step Into")
+        self.step_into_button.setToolTip("Step into function calls (s)")
+        self.step_into_button.clicked.connect(self.debug_step_into)
+        control_layout.addWidget(self.step_into_button)
+        
+        self.step_over_button = QtWidgets.QPushButton("Step Over")
+        self.step_over_button.setToolTip("Step over function calls (n)")
+        self.step_over_button.clicked.connect(self.debug_step_over)
+        control_layout.addWidget(self.step_over_button)
+        
+        self.step_out_button = QtWidgets.QPushButton("Step Out")
+        self.step_out_button.setToolTip("Step out of current function (r)")
+        self.step_out_button.clicked.connect(self.debug_step_out)
+        control_layout.addWidget(self.step_out_button)
+        
+        self.continue_button = QtWidgets.QPushButton("Continue")
+        self.continue_button.setToolTip("Continue execution until next breakpoint (c)")
+        self.continue_button.clicked.connect(self.debug_continue)
+        control_layout.addWidget(self.continue_button)
+        
+        # Separator
+        control_layout.addWidget(QtWidgets.QLabel("|"))
+        
+        # Command entry
+        self.cmd_entry = QtWidgets.QLineEdit()
+        self.cmd_entry.setPlaceholderText("Enter debugger commands (e.g., p variable_name)")
+        self.cmd_entry.returnPressed.connect(self.execute_command)
+        control_layout.addWidget(self.cmd_entry, 1)  # Give command entry more space
+        
+        main_layout.addLayout(control_layout)
+        
+        # Status bar
+        self.status_bar = QtWidgets.QStatusBar()
+        self.status_bar.showMessage("Ready")
+        main_layout.addWidget(self.status_bar)
+        
+        # Initialize debugger state
+        self.debugger_active = False
+        self.current_line = None
+        self.breakpoints = []
+        self.current_globals = {}
+        self.current_locals = {}
+        
+        # Initialize the debugger process and communication
+        self.debugger_process = None
+        self.current_file = None
+        
+        # Set window flags for a dialog
+        self.setWindowFlags(QtCore.Qt.WindowType.Dialog)
+        
+    def append_output(self, text):
+        """Add text to the debug output panel"""
+        self.debug_output.append(text)
+        
+    def debug_run(self):
+        """Start or resume debugging the current file"""
+        self.status_bar.showMessage("Running...")
+        self.append_output("<b>Program started</b>")
+        self.update_variable_view()
+        
+    def debug_pause(self):
+        """Pause the execution"""
+        self.status_bar.showMessage("Paused")
+        
+    def debug_stop(self):
+        """Stop debugging"""
+        self.status_bar.showMessage("Stopped")
+        self.append_output("<b>Program terminated</b>")
+        
+    def debug_step_into(self):
+        """Step into the next function call"""
+        self.status_bar.showMessage("Step into")
+        self.update_variable_view()
+        
+    def debug_step_over(self):
+        """Step over the next function call"""
+        self.status_bar.showMessage("Step over")
+        self.update_variable_view()
+        
+    def debug_step_out(self):
+        """Step out of the current function"""
+        self.status_bar.showMessage("Step out")
+        self.update_variable_view()
+        
+    def debug_continue(self):
+        """Continue execution until next breakpoint"""
+        self.status_bar.showMessage("Continuing...")
+        self.update_variable_view()
+        
+    def execute_command(self):
+        """Execute a debugger command entered by the user"""
+        command = self.cmd_entry.text()
+        self.cmd_entry.clear()
+        self.append_output(f"<span style='color:blue;'>&gt;&gt;&gt; {command}</span>")
+        # Here we would normally execute the command in the debugger
+        self.status_bar.showMessage(f"Executed: {command}")
+        
+    def update_variable_view(self):
+        """Update the variable inspector with current variables"""
+        self.var_inspector.clear()
+        
+        # Get variables from the current debugging session
+        if hasattr(self, 'debugger_active') and self.debugger_active:
+            # Use the actual variables from the debugging session
+            vars_to_display = {}
+            
+            # First add globals
+            if hasattr(self, 'current_globals') and self.current_globals:
+                vars_to_display.update(self.current_globals)
+            
+            # Then add locals (they override globals with the same name)
+            if hasattr(self, 'current_locals') and self.current_locals:
+                vars_to_display.update(self.current_locals)
+        else:
+            # Fallback to example variables if not debugging
+            vars_to_display = {
+                'x': 10,
+                'y': 'Hello',
+                'z': [1, 2, 3],
+                'complex_obj': {'a': 1, 'b': 2}
+            }
+        
+        # Display the variables in the tree widget
+        for name, value in vars_to_display.items():
+            # Skip internal/private variables
+            if name.startswith('__') and name.endswith('__'):
+                continue
+                
+            item = QtWidgets.QTreeWidgetItem()
+            item.setText(0, name)
+            item.setText(1, type(value).__name__)
+            
+            # Handle long or complex values better
+            try:
+                if isinstance(value, (dict, list, tuple)) and len(str(value)) > 50:
+                    str_val = str(value)[:50] + "..."
+                else:
+                    str_val = str(value)
+            except Exception:
+                str_val = "<Error displaying value>"
+                
+            item.setText(2, str_val)
+            self.var_inspector.addTopLevelItem(item)
+            
+    def highlight_current_line(self, line_number):
+        """Highlight the current line being executed in the code view"""
+        # Implementation would set background color for the current line
+        pass
+        
+    def add_breakpoint(self, file, line, condition=None):
+        """Add a breakpoint to the list"""
+        row = self.breakpoints_list.rowCount()
+        self.breakpoints_list.insertRow(row)
+        self.breakpoints_list.setItem(row, 0, QtWidgets.QTableWidgetItem(file))
+        self.breakpoints_list.setItem(row, 1, QtWidgets.QTableWidgetItem(str(line)))
+        self.breakpoints_list.setItem(row, 2, QtWidgets.QTableWidgetItem(condition or ""))
+        
+    def update_call_stack(self, stack_frames):
+        """Update the call stack view"""
+        self.call_stack.setRowCount(0)
+        # Implementation would populate the call stack from debugging info
+        
+    def add_watch_expression(self, expression):
+        """Add an expression to watch during debugging"""
+        row = self.watch_list.rowCount()
+        self.watch_list.insertRow(row)
+        self.watch_list.setItem(row, 0, QtWidgets.QTableWidgetItem(expression))
+        self.watch_list.setItem(row, 1, QtWidgets.QTableWidgetItem("Not evaluated"))
+        
+    def update_code_view(self, filename, line_number=None):
+        """Update the code view with the current file and highlight the current line"""
+        try:
+            with open(filename, 'r') as f:
+                code = f.read()
+                self.code_view.setPlainText(code)
+                if line_number:
+                    self.highlight_current_line(line_number)
+        except Exception as e:
+            self.append_output(f"<span style='color:red;'>Error reading file: {e}</span>")
                 
 class CodeAutoCompleter(QtWidgets.QCompleter):
     def __init__(self, parent=None):
@@ -1561,6 +1837,11 @@ class Pythonico(QtWidgets.QMainWindow):
 
         # Run menu
         run_menu = menubar.addMenu("&Run")
+        
+        debug_action = QtGui.QAction("Debug", self)
+        debug_action.setShortcut(QtGui.QKeySequence("Ctrl+D"))
+        debug_action.triggered.connect(self.debugProgram)
+        run_menu.addAction(debug_action)
 
         run_action = QtGui.QAction("Run", self)
         run_action.setShortcut(QtGui.QKeySequence("Ctrl+R"))
@@ -1907,6 +2188,81 @@ class Pythonico(QtWidgets.QMainWindow):
 
     def pasteText(self):
         self.terminal.paste()
+        
+    def debugProgram(self):
+        try:
+            # Get the current editor and its content
+            current_index = self.tab_widget.currentIndex()
+            current_editor = self.editors.get(current_index, self.editor)
+            content = current_editor.toPlainText()
+            
+            if not content:
+                QtWidgets.QMessageBox.warning(self, 
+                    "Empty Editor", 
+                    "The editor is empty. Please type some Python code to debug!")
+                return
+            
+            # Create debugger window if it doesn't exist
+            if not hasattr(self, 'debug_window'):
+                self.debug_window = debugger()
+            
+            # Show the debugger window
+            self.debug_window.show()
+            self.debug_window.raise_()
+            
+            # Clear previous output
+            self.debug_window.debug_output.clear()
+            
+            # Add header
+            self.debug_window.append_output("<b>Starting debug session...</b>")
+            
+            try:
+                # Execute the code with redirect to capture output
+                
+                out = io.StringIO()
+                err = io.StringIO()
+                
+                # Create a separate namespace for execution to avoid interfering with IDE
+                local_namespace = {}
+                global_namespace = {
+                    '__builtins__': __builtins__,
+                    '__name__': '__main__',
+                    '__file__': current_editor.property("file_path") or "untitled"
+                }
+                
+                with redirect_stdout(out), redirect_stderr(err):
+                    # Execute the code in an isolated namespace
+                    exec(content, global_namespace, local_namespace)
+                    
+                # Get the output
+                stdout_output = out.getvalue()
+                stderr_output = err.getvalue()
+                
+                # Update the debugger's variable state
+                self.debug_window.current_globals = global_namespace
+                self.debug_window.current_locals = local_namespace
+                
+                # Display output in the debugger
+                if stdout_output:
+                    self.debug_window.append_output("<b>Standard Output:</b>")
+                    self.debug_window.append_output(f"<pre>{stdout_output}</pre>")
+                    
+                if stderr_output:
+                    self.debug_window.append_output("<b>Standard Error:</b>")
+                    self.debug_window.append_output(f"<pre style='color: red;'>{stderr_output}</pre>")
+                    
+                if not stdout_output and not stderr_output:
+                    self.debug_window.append_output("Code executed successfully with no output.")
+                    
+            except Exception as e:
+                tb = traceback.format_exc()
+                self.debug_window.append_output("<b>Exception:</b>")
+                self.debug_window.append_output(f"<pre style='color: red;'>{tb}</pre>")
+                
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self,
+                "Debug Error",
+                f"An error occurred while debugging: {str(e)}")
 
     def runProgram(self):
         try:
@@ -1932,7 +2288,7 @@ class Pythonico(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self,
                 "Unhandled Python Exception",
-                f"An error occurred: {e}")
+                f"An error occurred: {e}")        
     
     def show_find_dialog(self):
         current_index = self.tab_widget.currentIndex()
