@@ -2,7 +2,7 @@
 
 import anthropic
 import speech_recognition as sr
-import os, sys, io, traceback, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil, pdb, tempfile, queue
+import os, sys, io, traceback, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil, pdb, tempfile, queue, traceback, signal
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -718,16 +718,8 @@ class debugger(QtWidgets.QDialog):
         self.setWindowTitle("Python Debugger")
         self.resize(800, 600)
         
-        # Thread safety
-        self.mutex = QtCore.QMutex()
-        self.command_ready = QtCore.QWaitCondition()
-        
         # Main layout
         main_layout = QtWidgets.QVBoxLayout(self)
-        
-        # Store the debug thread
-        self.debug_thread = None
-        self.debug_worker = None
         
         # Splitter for top and bottom parts
         main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -852,16 +844,15 @@ class debugger(QtWidgets.QDialog):
         QtGui.QShortcut(QtGui.QKeySequence("Up"), self.cmd_entry, self.history_prev)
         QtGui.QShortcut(QtGui.QKeySequence("Down"), self.cmd_entry, self.history_next)
         
+        # Initialize debugger process
+        self.debug_process = None
         self.debugger_active = False
         self.current_line = None
         self.breakpoints = []
         self.current_globals = {}
         self.current_locals = {}
-        self.pdb_instance = None
         self.code_to_debug = None
         self.current_file = None
-        self.pdb_output_buffer = io.StringIO()
-        self.pdb_command_queue = queue.Queue()
         
         # Command processing variables
         self.last_command = ""
@@ -870,22 +861,11 @@ class debugger(QtWidgets.QDialog):
         self.setWindowFlags(QtCore.Qt.WindowType.Dialog)
         
     def append_output(self, text):
-        # Thread-safe append to output - ensures UI updates happen on the main thread
-        QtCore.QMetaObject.invokeMethod(
-            self.debug_output,
-            "append",
-            QtCore.Qt.ConnectionType.QueuedConnection,
-            QtCore.Q_ARG(str, text)
-        )
+        self.debug_output.append(text)
         
         # Ensure the latest output is visible
         scrollbar = self.debug_output.verticalScrollBar()
-        QtCore.QMetaObject.invokeMethod(
-            scrollbar,
-            "setValue",
-            QtCore.Qt.ConnectionType.QueuedConnection,
-            QtCore.Q_ARG(int, scrollbar.maximum())
-        )
+        scrollbar.setValue(scrollbar.maximum())
         
     def history_prev(self):
         """Navigate to previous command in history with readline-like behavior"""
@@ -920,182 +900,185 @@ class debugger(QtWidgets.QDialog):
                 self.cmd_entry.clear()
         
     def debug_run(self):
-        self.mutex.lock()
-        try:
-            if self.debugger_active:
-                self.append_output("<span style='color:orange;'>Debug session already running</span>")
-                return
-                
-            self.status_bar.showMessage("Running with pdb...")
-            self.append_output("<b>Starting debug session with pdb</b>")
+        if self.debugger_active:
+            self.append_output("<span style='color:orange;'>Debug session already running</span>")
+            return
             
-            current_editor = self.current_editor if hasattr(self, 'current_editor') else None
-            if current_editor:
-                self.code_to_debug = current_editor.toPlainText()
-                self.current_file = current_editor.property("file_path") or "untitled"
+        self.status_bar.showMessage("Starting debugger...")
+        self.append_output("<b>Starting debug session</b>")
+        
+        current_editor = self.current_editor if hasattr(self, 'current_editor') else None
+        if current_editor:
+            self.code_to_debug = current_editor.toPlainText()
+            self.current_file = current_editor.property("file_path") or "untitled"
+            
+            self.code_view.setPlainText(self.code_to_debug)
+            
+            try:
+                # Create a temporary file if needed
+                if self.current_file == "untitled":
+                    temp = tempfile.NamedTemporaryFile(suffix='.py', delete=False)
+                    temp.write(self.code_to_debug.encode())
+                    temp.close()
+                    self.current_file = temp.name
+                else:
+                    # Save current content to file to ensure it's up to date
+                    with open(self.current_file, 'w') as f:
+                        f.write(self.code_to_debug)
                 
-                self.code_view.setPlainText(self.code_to_debug)
+                # Initialize command history
+                self.command_history = []
+                self.history_position = 0
+                self.current_input = ""
                 
-                try:
-                    if self.current_file == "untitled":
-                        temp = tempfile.NamedTemporaryFile(suffix='.py', delete=False)
-                        temp.write(self.code_to_debug.encode())
-                        temp.close()
-                        self.current_file = temp.name
-                    else:
-                        # Save current content to file to ensure it's up to date
-                        with open(self.current_file, 'w') as f:
-                            f.write(self.code_to_debug)
-                    
-                    # Initialize command history and current line
-                    self.command_history = []
-                    self.history_position = 0
-                    self.current_input = ""
-                    
-                    # Clear any existing command queue
-                    self.pdb_command_queue = queue.Queue()
-                    
-                    # Create debugging thread
-                    self.debug_thread = QtCore.QThread()
-                    self.debug_worker = PdbWorker(self.current_file, self.pdb_command_queue, 
-                                                  self.pdb_output_buffer)
-                    
-                    # Move worker to thread
-                    self.debug_worker.moveToThread(self.debug_thread)
-                    
-                    # Connect signals
-                    self.debug_thread.started.connect(self.debug_worker.run_debugger)
-                    self.debug_worker.finished.connect(self.debug_thread.quit)
-                    self.debug_worker.finished.connect(lambda: self.update_ui_state(False))
-                    self.debug_worker.output_ready.connect(self.append_output)
-                    self.debug_worker.error.connect(lambda msg: self.append_output(f"<span style='color:red;'>{msg}</span>"))
-                    self.debug_worker.variable_update.connect(self.update_variable_inspector)
-                    self.debug_worker.stack_update.connect(self.update_call_stack)
-                    self.debug_worker.line_update.connect(self.highlight_current_line)
-                    
-                    # Start debugging
+                # Create a QProcess to run the debugger
+                self.debug_process = QtCore.QProcess()
+                self.debug_process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+                self.debug_process.readyReadStandardOutput.connect(self.handle_debug_output)
+                self.debug_process.finished.connect(self.handle_debug_finished)
+                
+                # Start the debugger with the current file directly
+                python_executable = sys.executable
+                self.debug_process.start(python_executable, ['-u', '-m', 'pdb', self.current_file])
+                
+                if self.debug_process.waitForStarted(1000):
                     self.debugger_active = True
-                    self.debug_thread.start()
-                    
-                    # Enable/disable buttons appropriately
                     self.update_ui_state(True)
-                    
-                    # Set focus to command entry
                     self.cmd_entry.setFocus()
-                    
-                except Exception as e:
-                    self.append_output(f"<span style='color:red;'>Error starting debugger: {str(e)}</span>")
-                    self.append_output(f"<pre style='color:red;'>{traceback.format_exc()}</pre>")
+                else:
+                    self.append_output("<span style='color:red;'>Failed to start debugger process</span>")
                     self.debugger_active = False
-                    self.status_bar.showMessage("Error starting debugger")
-                    self.update_ui_state(False)
-            else:
-                self.append_output("<span style='color:red;'>No editor found to debug</span>")
-                self.status_bar.showMessage("No editor found")
-        finally:
-            self.mutex.unlock()
+            
+            except Exception as e:
+                self.append_output(f"<span style='color:red;'>Error starting debugger: {str(e)}</span>")
+                self.append_output(f"<pre style='color:red;'>{traceback.format_exc()}</pre>")
+                self.debugger_active = False
+                self.status_bar.showMessage("Error starting debugger")
+                self.update_ui_state(False)
+        else:
+            self.append_output("<span style='color:red;'>No editor found to debug</span>")
+            self.status_bar.showMessage("No editor found")
             
     def update_ui_state(self, debugging_active):
-        """Thread-safe update of UI elements based on debugging state"""
-        # Use invokeMethod for thread safety
-        QtCore.QMetaObject.invokeMethod(self.run_button, "setEnabled", 
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, not debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.pause_button, "setEnabled",
-                                        QtCore.Qt.ConnectionType.QueuedConnection, 
-                                        QtCore.Q_ARG(bool, debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.stop_button, "setEnabled",
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.step_into_button, "setEnabled",
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.step_over_button, "setEnabled", 
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.step_out_button, "setEnabled",
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.continue_button, "setEnabled",
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, debugging_active))
-                                        
-        QtCore.QMetaObject.invokeMethod(self.cmd_entry, "setEnabled",
-                                        QtCore.Qt.ConnectionType.QueuedConnection,
-                                        QtCore.Q_ARG(bool, debugging_active))
+        """Update UI elements based on debugging state"""
+        self.run_button.setEnabled(not debugging_active)
+        self.pause_button.setEnabled(debugging_active)
+        self.stop_button.setEnabled(debugging_active)
+        self.step_into_button.setEnabled(debugging_active)
+        self.step_over_button.setEnabled(debugging_active)
+        self.step_out_button.setEnabled(debugging_active)
+        self.continue_button.setEnabled(debugging_active)
+        self.cmd_entry.setEnabled(debugging_active)
         
-        # Update status bar in a thread-safe way
         if debugging_active:
-            QtCore.QMetaObject.invokeMethod(self.status_bar, "showMessage",
-                                            QtCore.Qt.ConnectionType.QueuedConnection,
-                                            QtCore.Q_ARG(str, "Debugging active"))
+            self.status_bar.showMessage("Debugging active")
         else:
-            QtCore.QMetaObject.invokeMethod(self.status_bar, "showMessage",
-                                            QtCore.Qt.ConnectionType.QueuedConnection,
-                                            QtCore.Q_ARG(str, "Debugging stopped"))
+            self.status_bar.showMessage("Debugging stopped")
+            
+    def handle_debug_output(self):
+        """Process output from the debug process"""
+        if not self.debug_process:
+            return
+            
+        data = self.debug_process.readAllStandardOutput().data().decode()
         
-    def setup_pdb_session(self):
-        # This method is now a placeholder since pdb session is managed by the PdbWorker
-        # The actual setup happens in debug_run
-        pass
+        # Handle special markers for variables and stack updates
+        if "VARIABLES_START" in data:
+            # Extract variables JSON
+            start = data.find("VARIABLES_START") + len("VARIABLES_START")
+            end = data.find("VARIABLES_END")
+            if start > 0 and end > start:
+                json_data = data[start:end].strip()
+                try:
+                    vars_dict = json.loads(json_data)
+                    self.update_variable_inspector(vars_dict)
+                except json.JSONDecodeError:
+                    self.append_output(f"<span style='color:red;'>Error parsing variables JSON</span>")
+                
+                # Remove the variables block from output
+                data = data[:start-len("VARIABLES_START")] + data[end+len("VARIABLES_END"):]
+        
+        if "STACK_START" in data:
+            # Extract stack JSON
+            start = data.find("STACK_START") + len("STACK_START")
+            end = data.find("STACK_END")
+            if start > 0 and end > start:
+                json_data = data[start:end].strip()
+                try:
+                    stack_frames = json.loads(json_data)
+                    self.update_call_stack(stack_frames)
+                except json.JSONDecodeError:
+                    self.append_output(f"<span style='color:red;'>Error parsing stack JSON</span>")
+                
+                # Remove the stack block from output
+                data = data[:start-len("STACK_START")] + data[end+len("STACK_END"):]
+        
+        # Handle line update markers
+        line_update = re.search(r"LINE_UPDATE (\d+)", data)
+        if line_update:
+            line_number = int(line_update.group(1))
+            self.highlight_current_line(line_number)
+            # Remove the line update marker from output
+            data = data.replace(line_update.group(0), "")
+        
+        # Add the remaining output
+        if data.strip():
+            self.append_output(data.strip())
+    
+    def handle_debug_finished(self, exit_code, exit_status):
+        """Handle debug process termination"""
+        self.debugger_active = False
+        self.update_ui_state(False)
+        self.append_output(f"<b>Debug process finished (exit code: {exit_code})</b>")
+        self.debug_process = None
             
     def debug_step_into(self):
-        if self.debugger_active:
-            self.execute_pdb_command("step")
-            self.status_bar.showMessage("Stepping into...")
+        if self.debugger_active and self.debug_process:
+            self.execute_command("step")
         
     def debug_step_over(self):
-        if self.debugger_active:
-            self.execute_pdb_command("next")
-            self.status_bar.showMessage("Stepping over...")
+        if self.debugger_active and self.debug_process:
+            self.execute_command("next")
         
     def debug_step_out(self):
-        if self.debugger_active:
-            self.execute_pdb_command("return")
-            self.status_bar.showMessage("Stepping out...")
+        if self.debugger_active and self.debug_process:
+            self.execute_command("return")
         
     def debug_continue(self):
-        if self.debugger_active:
-            self.execute_pdb_command("continue")
-            self.status_bar.showMessage("Continuing execution...")
+        if self.debugger_active and self.debug_process:
+            self.execute_command("continue")
     
     def debug_pause(self):
-        if self.debugger_active:
-            # Signal the worker to pause execution if possible
-            if hasattr(self, 'debug_worker') and self.debug_worker:
-                self.append_output("<i>Attempting to pause execution...</i>")
-                # Send keyboard interrupt signal to the pdb process if supported
-                # This is a placeholder - full implementation would require more complex code
-                self.execute_pdb_command("interrupt")  # Custom command handled by worker
+        if self.debugger_active and self.debug_process:
+            self.append_output("<i>Attempting to pause execution...</i>")
+            # Try to send CTRL+C to the process (platform-dependent)
+            if self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+                if hasattr(self.debug_process, 'signalProcess'):
+                    self.debug_process.signalProcess(QtCore.QProcess.ProcessSignal.Interrupt)
+                else:
+                    # Fallback for older Qt versions
+                    os.kill(int(self.debug_process.processId()), signal.SIGINT)
         
     def debug_stop(self):
-        self.mutex.lock()
-        try:
-            if self.debugger_active:
-                # Send quit command to pdb
-                self.execute_pdb_command("quit")
-                self.status_bar.showMessage("Stopping debugger...")
-                self.append_output("<b>Sending stop signal to debugger...</b>")
-                
-                # Wait for thread to finish with timeout
-                if hasattr(self, 'debug_thread') and self.debug_thread.isRunning():
-                    if not self.debug_thread.wait(2000):  # 2 second timeout
-                        self.debug_thread.terminate()
-                        self.append_output("<span style='color:orange;'>Force terminated debug session</span>")
-                
-                self.debugger_active = False
-                self.update_ui_state(False)
-        finally:
-            self.mutex.unlock()
+        if self.debugger_active and self.debug_process:
+            self.execute_command("quit")
+            self.status_bar.showMessage("Stopping debugger...")
+            self.append_output("<b>Sending stop signal to debugger...</b>")
+            
+            # Give it a chance to exit gracefully
+            if not self.debug_process.waitForFinished(1000):
+                self.debug_process.kill()
+                self.append_output("<span style='color:orange;'>Force terminated debug session</span>")
+            
+            self.debugger_active = False
+            self.update_ui_state(False)
         
-    def execute_command(self):
-        command = self.cmd_entry.text().strip()
+    def execute_command(self, command=None):
+        if command is None:
+            command = self.cmd_entry.text().strip()
+        else:
+            command = str(command).strip()
+            
         if not command:
             return
             
@@ -1107,165 +1090,68 @@ class debugger(QtWidgets.QDialog):
         
         self.append_output(f"<span style='color:blue;'>&gt;&gt;&gt; {command}</span>")
         
-        if self.debugger_active:
-            self.execute_pdb_command(command)
+        if self.debugger_active and self.debug_process:
+            # Send the command to the debug process
+            self.debug_process.write(f"{command}\n".encode())
         else:
             self.append_output("<i>Debugger is not active</i>")
                 
-    def execute_pdb_command(self, command):
-        self.mutex.lock()
-        try:
-            if self.debugger_active and hasattr(self, 'pdb_command_queue'):
-                self.pdb_command_queue.put(command + "\n")  # Add newline for pdb input
-                
-                # Signal that a command is ready
-                if hasattr(self, 'command_ready'):
-                    self.command_ready.wakeAll()
-            else:
-                self.append_output("<i>Debugger is not active</i>")
-        finally:
-            self.mutex.unlock()
-            
     def update_variable_inspector(self, vars_dict):
-        """Thread-safe update of variable inspector"""
-        self.mutex.lock()
-        try:
-            self.var_inspector.clear()
-            self.current_locals = vars_dict.get('locals', {})
-            self.current_globals = vars_dict.get('globals', {})
-            
-            # Display locals first
-            for name, value in sorted(self.current_locals.items()):
-                if name.startswith('__') and name.endswith('__'):
-                    continue
-                self._add_variable_to_tree(name, value)
-            
-            # Then display globals that aren't in locals
-            for name, value in sorted(self.current_globals.items()):
-                if name in self.current_locals or (name.startswith('__') and name.endswith('__')):
-                    continue
-                self._add_variable_to_tree(f"(global) {name}", value)
-        finally:
-            self.mutex.unlock()
+        """Update the variable inspector with new values"""
+        self.var_inspector.clear()
+        self.current_locals = vars_dict.get('locals', {})
+        self.current_globals = vars_dict.get('globals', {})
+        
+        # Display locals first
+        for name, value in sorted(self.current_locals.items()):
+            if name.startswith('__') and name.endswith('__'):
+                continue
+            self._add_variable_to_tree(name, value)
+        
+        # Then display globals that aren't in locals
+        for name, value in sorted(self.current_globals.items()):
+            if name in self.current_locals or (name.startswith('__') and name.endswith('__')):
+                continue
+            self._add_variable_to_tree(f"(global) {name}", value)
     
     def _add_variable_to_tree(self, name, value, parent=None):
-        # Thread-safe implementation of adding variables to the tree
-        def add_to_tree():
-            item = QtWidgets.QTreeWidgetItem(parent or self.var_inspector)
-            item.setText(0, str(name))
-            item.setText(1, type(value).__name__)
-            try:
-                if isinstance(value, (dict, list, tuple)) and len(str(value)) > 50:
-                    item.setText(2, f"{str(value)[:50]}...")
-                    if isinstance(value, dict):
-                        for k, v in list(value.items())[:100]:  # Limit to 100 items for performance
-                            self._add_variable_to_tree(str(k), v, item)
-                    elif isinstance(value, (list, tuple)):
-                        for i, v in enumerate(list(value)[:100]):  # Limit to 100 items
-                            self._add_variable_to_tree(f"[{i}]", v, item)
-                else:
-                    item.setText(2, str(value))
-            except Exception:
-                item.setText(2, "<Error displaying value>")
-            return item
-
-        # Use invokeMethod if we're not in the main thread
-        if QtCore.QThread.currentThread() != QtWidgets.QApplication.instance().thread():
-            QtCore.QMetaObject.invokeMethod(self.var_inspector, "setUpdatesEnabled", 
-                                          QtCore.Qt.ConnectionType.QueuedConnection,
-                                          QtCore.Q_ARG(bool, False))
-            result = add_to_tree()
-            QtCore.QMetaObject.invokeMethod(self.var_inspector, "setUpdatesEnabled", 
-                                          QtCore.Qt.ConnectionType.QueuedConnection,
-                                          QtCore.Q_ARG(bool, True))
-            return result
+        item = QtWidgets.QTreeWidgetItem(parent or self.var_inspector)
+        item.setText(0, str(name))
+        
+        # Try to determine the type from the string representation
+        if value.startswith("<class '"):
+            type_name = value.split("'")[1]
+        elif value.startswith("<") and "object at" in value:
+            type_name = value.split()[0][1:]
         else:
-            # We're in the main thread, execute directly
-            return add_to_tree()
+            type_name = "str"
+            
+        item.setText(1, type_name)
+        
+        # Display value
+        if len(value) > 50:
+            item.setText(2, f"{value[:50]}...")
+        else:
+            item.setText(2, value)
+            
+        return item
             
     def update_call_stack(self, stack_frames):
-        # Thread-safe implementation of updating call stack
-        def update_stack():
-            self.call_stack.setRowCount(0)
-            for frame in stack_frames:
-                row = self.call_stack.rowCount()
-                self.call_stack.insertRow(row)
-                self.call_stack.setItem(row, 0, QtWidgets.QTableWidgetItem(frame.get('function', '')))
-                self.call_stack.setItem(row, 1, QtWidgets.QTableWidgetItem(frame.get('filename', '')))
-                self.call_stack.setItem(row, 2, QtWidgets.QTableWidgetItem(str(frame.get('line', ''))))
-        
-        # Use invokeMethod if we're not in the main thread
-        if QtCore.QThread.currentThread() != QtWidgets.QApplication.instance().thread():
-            QtCore.QMetaObject.invokeMethod(self, "update_stack_main_thread", 
-                                          QtCore.Qt.ConnectionType.QueuedConnection,
-                                          QtCore.Q_ARG(list, stack_frames))
-        else:
-            update_stack()
-    
-    @QtCore.pyqtSlot(list)
-    def update_stack_main_thread(self, stack_frames):
-        self.mutex.lock()
-        try:
-            self.call_stack.setRowCount(0)
-            for frame in stack_frames:
-                row = self.call_stack.rowCount()
-                self.call_stack.insertRow(row)
-                self.call_stack.setItem(row, 0, QtWidgets.QTableWidgetItem(frame.get('function', '')))
-                self.call_stack.setItem(row, 1, QtWidgets.QTableWidgetItem(frame.get('filename', '')))
-                self.call_stack.setItem(row, 2, QtWidgets.QTableWidgetItem(str(frame.get('line', ''))))
-        finally:
-            self.mutex.unlock()
+        self.call_stack.setRowCount(0)
+        for frame in stack_frames:
+            row = self.call_stack.rowCount()
+            self.call_stack.insertRow(row)
+            self.call_stack.setItem(row, 0, QtWidgets.QTableWidgetItem(frame.get('function', '')))
+            self.call_stack.setItem(row, 1, QtWidgets.QTableWidgetItem(frame.get('filename', '')))
+            self.call_stack.setItem(row, 2, QtWidgets.QTableWidgetItem(str(frame.get('line', ''))))
         
     def update_code_view(self, filename=None, line_number=None):
-        def do_update():
-            try:
-                if not filename and hasattr(self, 'current_file'):
-                    filename = self.current_file
-                    
-                # Use the code from the editor if we're debugging an unsaved file
-                if filename == "untitled" or not os.path.exists(filename):
-                    if hasattr(self, 'code_to_debug') and self.code_to_debug:
-                        self.code_view.setPlainText(self.code_to_debug)
-                        if line_number:
-                            self.highlight_current_line(line_number)
-                            self.status_bar.showMessage(f"At line {line_number}")
-                        return
-                    
-                # Open the file if it exists
-                if filename and os.path.exists(filename):
-                    with open(filename, 'r') as f:
-                        code = f.read()
-                        self.code_view.setPlainText(code)
-                        
-                        if line_number:
-                            self.highlight_current_line(line_number)
-                            self.status_bar.showMessage(f"At {filename}:{line_number}")
-                else:
-                    self.append_output(f"<span style='color:orange;'>Note: Using in-memory code (file not saved yet)</span>")
-            except Exception as e:
-                self.append_output(f"<span style='color:red;'>Error reading file: {str(e)}</span>")
-                # Fallback to the code_to_debug if available
-                if hasattr(self, 'code_to_debug') and self.code_to_debug:
-                    self.code_view.setPlainText(self.code_to_debug)
-        
-        # Ensure updates happen on the main thread
-        if QtCore.QThread.currentThread() != QtWidgets.QApplication.instance().thread():
-            QtCore.QMetaObject.invokeMethod(self, "update_code_view_main_thread", 
-                                          QtCore.Qt.ConnectionType.QueuedConnection,
-                                          QtCore.Q_ARG(str, filename if filename else ""),
-                                          QtCore.Q_ARG(int, line_number if line_number else 0))
-        else:
-            do_update()
-    
-    @QtCore.pyqtSlot(str, int)
-    def update_code_view_main_thread(self, filename, line_number):
-        self.mutex.lock()
         try:
-            if not filename:
-                filename = self.current_file if hasattr(self, 'current_file') else None
+            if not filename and hasattr(self, 'current_file'):
+                filename = self.current_file
                 
-            # Rest of the update code logic
-            if filename == "untitled" or not filename or not os.path.exists(filename):
+            # Use the code from the editor if we're debugging an unsaved file
+            if filename == "untitled" or not os.path.exists(filename):
                 if hasattr(self, 'code_to_debug') and self.code_to_debug:
                     self.code_view.setPlainText(self.code_to_debug)
                     if line_number:
@@ -1286,307 +1172,49 @@ class debugger(QtWidgets.QDialog):
                 self.append_output(f"<span style='color:orange;'>Note: Using in-memory code (file not saved yet)</span>")
         except Exception as e:
             self.append_output(f"<span style='color:red;'>Error reading file: {str(e)}</span>")
+            # Fallback to the code_to_debug if available
             if hasattr(self, 'code_to_debug') and self.code_to_debug:
                 self.code_view.setPlainText(self.code_to_debug)
-        finally:
-            self.mutex.unlock()
             
     def highlight_current_line(self, line_number):
-        def do_highlight():
-            cursor = self.code_view.textCursor()
-            cursor.setPosition(0)
-            for _ in range(1, line_number):
-                cursor.movePosition(QtGui.QTextCursor.MoveOperation.NextBlock)
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfBlock, QtGui.QTextCursor.MoveMode.KeepAnchor)
-            
-            highlight_format = QtGui.QTextCharFormat()
-            highlight_format.setBackground(QtGui.QColor("#ffffcc"))
-            
-            selection = QtWidgets.QTextEdit.ExtraSelection()
-            selection.format = highlight_format
-            selection.cursor = cursor
-            
-            self.code_view.setExtraSelections([selection])
-            self.code_view.setTextCursor(cursor)
-            self.code_view.ensureCursorVisible()
-            
-            self.current_line = line_number
+        cursor = self.code_view.textCursor()
+        cursor.setPosition(0)
+        for _ in range(1, line_number):
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.NextBlock)
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfBlock, QtGui.QTextCursor.MoveMode.KeepAnchor)
         
-        # Ensure highlighting happens on the main thread
-        if QtCore.QThread.currentThread() != QtWidgets.QApplication.instance().thread():
-            QtCore.QMetaObject.invokeMethod(self, "highlight_line_main_thread", 
-                                          QtCore.Qt.ConnectionType.QueuedConnection,
-                                          QtCore.Q_ARG(int, line_number))
-        else:
-            do_highlight()
-    
-    @QtCore.pyqtSlot(int)
-    def highlight_line_main_thread(self, line_number):
-        self.mutex.lock()
-        try:
-            cursor = self.code_view.textCursor()
-            cursor.setPosition(0)
-            for _ in range(1, line_number):
-                cursor.movePosition(QtGui.QTextCursor.MoveOperation.NextBlock)
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfBlock, QtGui.QTextCursor.MoveMode.KeepAnchor)
-            
-            highlight_format = QtGui.QTextCharFormat()
-            highlight_format.setBackground(QtGui.QColor("#ffffcc"))
-            
-            selection = QtWidgets.QTextEdit.ExtraSelection()
-            selection.format = highlight_format
-            selection.cursor = cursor
-            
-            self.code_view.setExtraSelections([selection])
-            self.code_view.setTextCursor(cursor)
-            self.code_view.ensureCursorVisible()
-            
-            self.current_line = line_number
-        finally:
-            self.mutex.unlock()
+        highlight_format = QtGui.QTextCharFormat()
+        highlight_format.setBackground(QtGui.QColor("#ffffcc"))
+        
+        selection = QtWidgets.QTextEdit.ExtraSelection()
+        selection.format = highlight_format
+        selection.cursor = cursor
+        
+        self.code_view.setExtraSelections([selection])
+        self.code_view.setTextCursor(cursor)
+        self.code_view.ensureCursorVisible()
+        
+        self.current_line = line_number
         
     def add_breakpoint(self, file, line, condition=None):
-        # Thread-safe breakpoint addition
-        self.mutex.lock()
-        try:
-            row = self.breakpoints_list.rowCount()
-            self.breakpoints_list.insertRow(row)
-            self.breakpoints_list.setItem(row, 0, QtWidgets.QTableWidgetItem(file))
-            self.breakpoints_list.setItem(row, 1, QtWidgets.QTableWidgetItem(str(line)))
-            self.breakpoints_list.setItem(row, 2, QtWidgets.QTableWidgetItem(condition or ""))
-            
-            bp = {'file': file, 'line': line, 'condition': condition}
-            self.breakpoints.append(bp)
-            
-            if self.debugger_active:
-                self.execute_pdb_command(f"break {file}:{line}")
-                if condition:
-                    self.execute_pdb_command(f"condition {line} {condition}")
-        finally:
-            self.mutex.unlock()
+        row = self.breakpoints_list.rowCount()
+        self.breakpoints_list.insertRow(row)
+        self.breakpoints_list.setItem(row, 0, QtWidgets.QTableWidgetItem(file))
+        self.breakpoints_list.setItem(row, 1, QtWidgets.QTableWidgetItem(str(line)))
+        self.breakpoints_list.setItem(row, 2, QtWidgets.QTableWidgetItem(condition or ""))
+        
+        bp = {'file': file, 'line': line, 'condition': condition}
+        self.breakpoints.append(bp)
+        
+        if self.debugger_active and self.debug_process:
+            self.execute_command(f"break {file}:{line}")
+            if condition:
+                self.execute_command(f"condition {line} {condition}")
     
     def closeEvent(self, event):
-        if self.debugger_active:
+        if self.debugger_active and self.debug_process:
             self.debug_stop()
-        if hasattr(self, 'debug_thread') and self.debug_thread and self.debug_thread.isRunning():
-            self.debug_thread.quit()
-            self.debug_thread.wait()
         event.accept()
-    
-class PdbWorker(QtCore.QObject):
-    finished = QtCore.pyqtSignal()
-    output_ready = QtCore.pyqtSignal(str)
-    error = QtCore.pyqtSignal(str)
-    variable_update = QtCore.pyqtSignal(dict)
-    stack_update = QtCore.pyqtSignal(list)
-    line_update = QtCore.pyqtSignal(int)
-    ready_for_input = QtCore.pyqtSignal()
-    
-    def __init__(self, script_file, cmd_queue, output_buffer):
-        super().__init__()
-        self.script_file = script_file
-        self.cmd_queue = cmd_queue
-        self.output_buffer = output_buffer
-        self.running = True
-        self.mutex = QtCore.QMutex()
-        self.wait_condition = QtCore.QWaitCondition()
-        self.command_ready = False
-        
-    def run_debugger(self):
-        try:
-            # Create our custom stdout/stdin for pdb to use
-            custom_stdout = PdbOutputRedirector(self)
-            custom_stdin = PdbInputRedirector(self)
-            
-            # Create the pdb instance with redirected I/O
-            self.pdb = pdb.Pdb(stdout=custom_stdout, stdin=custom_stdin)
-            
-            # Set a timer to periodically check for variables
-            self.timer = QtCore.QTimer()
-            self.timer.setInterval(300)  # Check every 300ms
-            self.timer.timeout.connect(self.check_debugger_state)
-            self.timer.start()
-            
-            # Initialize pdb but don't execute immediately
-            self.pdb.reset()
-            
-            # Use set_trace to stop at the first line and wait for user input
-            # instead of directly running the code which would execute and exit
-            self.pdb._set_stopinfo(None, None)  # Clear any stop info
-            self.pdb.curframe = None
-            
-            # Set up initial state to show the first line
-            try:
-                # Force pdb to stop at the first line
-                self.output_ready.emit(f"> {self.script_file}(1)<module>()\n-> First line of the script\n")
-                
-                # Use proper setup with correct arguments
-                frame = sys._getframe()
-                self.pdb.setup(frame, None)  # None for the traceback argument
-                
-                # Signal we're ready for input
-                self.ready_for_input.emit()
-                
-                # Now we're ready to process commands, let the user interact with the debugger
-                self.pdb.set_trace(sys._getframe())
-            except Exception as e:
-                # Use proper setup with correct arguments
-                frame = sys._getframe()
-                self.pdb.setup(frame, None)  # Added traceback argument which is required
-                self.error.emit(f"Setup error: {str(e)}")
-                
-            # Use our own 'running' flag instead of internal pdb attributes
-            self.running = True
-            while self.running:
-                try:
-                    # Wait for commands using the wait condition for more responsive UI
-                    self.mutex.lock()
-                    if not self.command_ready and self.running:
-                        self.ready_for_input.emit()  # Signal we're ready for input
-                        self.wait_condition.wait(self.mutex, 100)  # Wait with timeout
-                    
-                    if self.command_ready and self.running:
-                        command = self.cmd_queue.get(block=False)
-                        self.command_ready = False
-                        self.mutex.unlock()
-                        
-                        if command.strip() == "quit":
-                            self.running = False
-                            break
-                        
-                        try:
-                            # Process the command in pdb
-                            self.pdb.onecmd(command)
-                            
-                            # Signal we're ready for more input after processing
-                            self.ready_for_input.emit()
-                        except Exception as e:
-                            self.error.emit(f"Command error: {str(e)}")
-                    else:
-                        self.mutex.unlock()
-                        
-                except queue.Empty:
-                    # No command available, continue waiting
-                    pass
-                
-                # Small sleep to prevent CPU spinning
-                QtCore.QThread.msleep(10)
-            
-            # Stop the timer when done
-            self.timer.stop()
-            
-            # Signal completion
-            self.finished.emit()
-            
-        except Exception as e:
-            self.error.emit(f"Error in debugger: {str(e)}\n{traceback.format_exc()}")
-            self.finished.emit()
-    
-    def check_debugger_state(self):
-        """Periodically check debugger state to update UI"""
-        try:
-            if hasattr(self, 'pdb') and hasattr(self.pdb, 'curframe'):
-                # Get current frame information
-                frame = self.pdb.curframe
-                if frame:
-                    # Extract variables from current frame
-                    vars_dict = {
-                        'locals': {k: v for k, v in frame.f_locals.items()},
-                        'globals': {k: v for k, v in frame.f_globals.items()}
-                    }
-                    self.variable_update.emit(vars_dict)
-                    
-                    # Extract stack information
-                    stack_frames = []
-                    if hasattr(self.pdb, 'stack'):
-                        for _, frame_info in enumerate(self.pdb.stack):
-                            frame, line_no = frame_info
-                            code = frame.f_code
-                            stack_frames.append({
-                                'function': code.co_name or "<module>",
-                                'filename': code.co_filename,
-                                'line': line_no
-                            })
-                    self.stack_update.emit(stack_frames)
-                    
-                    # Update current line if available
-                    if hasattr(self.pdb, 'curframe_lineno'):
-                        self.line_update.emit(self.pdb.curframe_lineno)
-        except Exception as e:
-            # Just log the error, don't crash the timer
-            self.error.emit(f"Error updating debugger state: {str(e)}")
-    
-    def add_command(self, command):
-        """Thread-safe method to add a command to the queue"""
-        self.mutex.lock()
-        try:
-            self.cmd_queue.put(command)
-            self.command_ready = True
-            self.wait_condition.wakeAll()
-        finally:
-            self.mutex.unlock()
-
-class PdbInputRedirector:
-    def __init__(self, worker):
-        self.worker = worker
-        self.buffer = ""
-        
-    def readline(self):
-        # Wait for input in a way that doesn't block the UI
-        self.worker.mutex.lock()
-        try:
-            # Wait for input with timeout to keep UI responsive
-            while not self.worker.command_ready and self.worker.running:
-                # Signal that we're waiting for input
-                self.worker.ready_for_input.emit()
-                
-                # Wait for a short time with a timeout
-                self.worker.wait_condition.wait(self.worker.mutex, 100)  # 100ms timeout
-                
-                if not self.worker.running:
-                    # Wait for a short time with a timeout
-                    self.worker.wait_condition.wait(self.worker.mutex, 100)  # 100ms timeout
-                
-                if not self.worker.running:
-                    command = self.worker.cmd_queue.get(block=False)
-                    self.worker.command_ready = False
-                    return command
-        except queue.Empty:
-            return "\n"  # Return newline if no command available
-                
-        finally:
-            self.worker.mutex.unlock()
-        
-    def flush(self):
-        pass
-
-class PdbOutputRedirector:
-    def __init__(self, worker):
-        self.worker = worker
-        self.buffer = []
-        self.mutex = QtCore.QMutex()
-        
-    def write(self, data):
-        self.mutex.lock()
-        try:
-            self.buffer.append(data)
-            # Send complete lines to the UI
-            if '\n' in data:
-                output = ''.join(self.buffer)
-                self.worker.output_ready.emit(output)
-                self.buffer = []
-        finally:
-            self.mutex.unlock()
-            
-    def flush(self):
-        self.mutex.lock()
-        try:
-            if self.buffer:
-                output = ''.join(self.buffer)
-                self.worker.output_ready.emit(output)
-                self.buffer = []
-        finally:
-            self.mutex.unlock()
 
 class CodeAutoCompleter(QtWidgets.QCompleter):
     def __init__(self, parent=None):
