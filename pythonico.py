@@ -729,11 +729,23 @@ class debugger(QtWidgets.QDialog):
         top_layout = QtWidgets.QHBoxLayout(top_widget)
         
         # Left side: Code view with line numbers
-        self.code_view = QtWidgets.QTextEdit()
+        code_view_container = QtWidgets.QWidget()
+        code_view_layout = QtWidgets.QHBoxLayout(code_view_container)
+        code_view_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create code view with plain text edit for better line number support
+        self.code_view = QtWidgets.QPlainTextEdit()
         self.code_view.setReadOnly(True)
         self.code_view.setFont(QtGui.QFont("Monospace", 10))
-        self.code_view.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.NoWrap)
+        self.code_view.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
         self.code_view.setStyleSheet("background-color: #f8f8f8;")
+        
+        # Create line count widget for the code view
+        self.line_count = LineCountWidget(self.code_view)
+        
+        # Add line count widget and code view to the container layout
+        code_view_layout.addWidget(self.line_count)
+        code_view_layout.addWidget(self.code_view)
         
         # Right side: Variable inspector as a tree view
         self.var_inspector = QtWidgets.QTreeWidget()
@@ -742,7 +754,7 @@ class debugger(QtWidgets.QDialog):
         self.var_inspector.setColumnWidth(1, 100)
         
         # Add code view and variable inspector to the top layout
-        top_layout.addWidget(self.code_view, 3)
+        top_layout.addWidget(code_view_container, 3)
         top_layout.addWidget(self.var_inspector, 2)
         
         # Bottom part: Tabbed output, call stack, breakpoints
