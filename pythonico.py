@@ -86,18 +86,20 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             "Swedish (sv-SE)",
             "Ukrainian (uk-UA)"
         ])
-        self.language_selector.setToolTip("Select speech recognition language")
+        self.language_selector.setToolTip("Select Speech Recognition Language")
         self.language_selector.setMaximumWidth(120)
         input_layout.addWidget(self.language_selector)
         
         # Add a microphone button to trigger voice input
         self.microphone_button = QtWidgets.QPushButton("Mic", self)
+        self.microphone_button.setToolTip("Start/Stop Voice Input")
         self.microphone_button.clicked.connect(self.toggle_voice_input)
         self.is_listening = False  # Flag to track voice input state
         input_layout.addWidget(self.microphone_button)
         
         # Add a send button to send the input
         self.send_button = QtWidgets.QPushButton("Send", self)
+        self.send_button.setToolTip("Send the input to Claude")
         self.send_button.clicked.connect(self.send_request)
         input_layout.addWidget(self.send_button)
 
