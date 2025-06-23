@@ -1,0 +1,7 @@
+anthropic>=0.25.0
+SpeechRecognition>=3.10.0
+PyAudio>=0.2.11
+PyQt6>=6.5.0
+pyqtconsole>=1.2.2
+markdown>=3.4.0
+pyinstaller>=5.13.0

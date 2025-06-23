@@ -2,7 +2,7 @@
 
 import anthropic
 import speech_recognition as sr
-import os, sys, io, traceback, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil, pdb, tempfile, queue, traceback, signal
+import os, sys, traceback, markdown, pyaudio, keyword, re, webbrowser, json, pkgutil, tempfile, signal, pdb
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
@@ -33,12 +33,12 @@ class ClaudeAIWorker(QtCore.QThread):
 
 class ClaudeAIWidget(QtWidgets.QWidget):
     def closeEvent(self, event):
-            if hasattr(self, 'worker') and self.worker.isRunning():
-                self.worker.quit()
-                if not self.worker.wait(1000):  # Wait up to 1 second
-                    self.worker.terminate()  # Force terminate if not quitting cleanly
-                    self.worker.wait()  # Wait for termination
-            event.accept()
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.quit()
+            if not self.worker.wait(1000):  # Wait up to 1 second
+                self.worker.terminate()  # Force terminate if not quitting cleanly
+                self.worker.wait()  # Wait for termination
+        event.accept()
         
     def __init__(self):
         super().__init__()
@@ -165,6 +165,7 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             self.silence_timer.start()
                 
         except Exception as e:
+            print(f"Error starting listening: {e}")
             self.is_listening = False
             self.microphone_button.setStyleSheet("")
             self.microphone_button.setText("Mic")
@@ -323,93 +324,224 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             f"<span style='color: blue; font-weight: bold;'>Assistant:</span> {formatted_response}<br>"
         )
         
-# Create a custom widget to display line numbers
-class LineCountWidget(QtWidgets.QTextEdit):
+# Advanced line number widget with perfect pixel-level alignment
+class LineCountWidget(QtWidgets.QWidget):
+    line_clicked = QtCore.pyqtSignal(int)
+    
     def __init__(self, editor):
         super().__init__()
         self.editor = editor
-        self.setReadOnly(True)
-
-        # Set the fixed width of the line count widget
-        self.setFixedWidth(40)
+        self.breakpoints = set()
         
-        # Store the current font for comparison
-        self.current_font = editor.font()
+        # Set initial properties
+        self.setFixedWidth(60)
+        self.setMinimumHeight(0)
         
-        # Set the same font as the editor
-        self.setFont(self.current_font)
+        # Configure appearance
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f8f8f8;
+                border: none;
+                border-right: 1px solid #d0d0d0;
+            }
+        """)
         
-        # Set the background color to match the editor
-        self.setStyleSheet("background-color: #f0f0f0;")
+        # Connect to editor signals for perfect synchronization
+        self.editor.blockCountChanged.connect(self.update_line_numbers)
+        self.editor.textChanged.connect(self.update_line_numbers)
+        self.editor.cursorPositionChanged.connect(self.update_line_numbers)
+        self.editor.verticalScrollBar().valueChanged.connect(self.update_line_numbers)
         
-        # Disable scroll bars
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        self.setStyleSheet("background-color: lightgray;")
+        # Install event filter on editor for resize and font change events
+        self.editor.installEventFilter(self)
         
-        # Center the text in the widget
-        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-        # Connect textChanged signal to update the line count
-        self.editor.textChanged.connect(self.update_line_count)
-
-        # Connect the editor's vertical scroll bar to the update_line_count slot
-        self.editor.verticalScrollBar().valueChanged.connect(self.update_line_count)
-
-        self.editor.cursorPositionChanged.connect(self.update_line_count)
+        # Create timer for periodic font synchronization
+        self.font_sync_timer = QtCore.QTimer()
+        self.font_sync_timer.timeout.connect(self.sync_font_with_editor)
+        self.font_sync_timer.start(100)  # Check every 100ms for font changes
         
-        # Connect to textChanged to check for font changes
-        self.editor.textChanged.connect(self.check_font_changes)
+        # Initialize
+        QtCore.QTimer.singleShot(0, self.update_line_numbers)
+    
+    def update_line_numbers(self):
+        """Update line numbers and trigger repaint"""
+        # Ensure our font matches the editor exactly
+        editor_font = self.editor.font()
+        if self.font() != editor_font:
+            self.setFont(editor_font)
         
-        # Make sure font is properly synchronized at startup
-        QtCore.QTimer.singleShot(0, self.sync_font_with_editor)
+        self.update()  # Trigger paintEvent
         
-    def check_font_changes(self):
-        """Check if the editor font has changed and update if needed"""
-        if self.current_font != self.editor.font():
-            self.current_font = self.editor.font()
-            self.setFont(self.current_font)
-            self.update_line_count()
-            
-    def sync_font_with_editor(self):
-        """Synchronize the font with the editor's font"""
-        self.setFont(self.editor.font())
-        self.current_font = self.editor.font()
-        self.update_line_count()
+        # Update widget size to match editor height exactly
+        editor_height = self.editor.height()
+        if self.height() != editor_height:
+            self.setFixedHeight(editor_height)
         
-    def update_line_count(self):
-        # Ensure font is in sync before calculations
-        if self.font() != self.editor.font():
-            self.setFont(self.editor.font())
-            
-        # Get the total number of lines in the editor
+        # Calculate optimal width using editor's exact font metrics
         total_lines = self.editor.blockCount()
-
-        # Get the first visible block
+        max_digits = len(str(total_lines))
+        font_metrics = self.editor.fontMetrics()  # Use editor's font metrics
+        sample_text = "→" + "9" * max_digits
+        text_width = font_metrics.horizontalAdvance(sample_text)
+        optimal_width = text_width + 20
+        
+        new_width = max(50, min(120, optimal_width))
+        if self.width() != new_width:
+            self.setFixedWidth(new_width)
+    
+    def update_line_count(self):
+        """Compatibility method - redirects to update_line_numbers"""
+        self.update_line_numbers()
+    
+    def paintEvent(self, event):
+        """Custom paint event for perfect line number alignment"""
+        painter = QtGui.QPainter(self)
+        painter.fillRect(event.rect(), QtGui.QColor("#f8f8f8"))
+        
+        # Set font to match editor EXACTLY - same family, size, and style
+        editor_font = self.editor.font()
+        painter.setFont(editor_font)
+        
+        # Use the SAME font metrics as the editor for perfect alignment
+        font_metrics = self.editor.fontMetrics()  # Use editor's font metrics directly
+        line_height = font_metrics.height()
+        
+        # Ensure our widget uses the same font for any other operations
+        if self.font() != editor_font:
+            self.setFont(editor_font)
+        
+        # Get editor's exact positioning using Qt's block layout system
+        current_line = self.editor.textCursor().blockNumber()
+        total_lines = self.editor.blockCount()
+        
+        # Get the first visible block and its exact position
         first_visible_block = self.editor.firstVisibleBlock()
-        first_visible_line = first_visible_block.blockNumber()
-
-        # Get the number of visible lines using editor metrics for consistency
-        editor_line_height = self.editor.fontMetrics().height()
-        visible_lines = self.editor.viewport().height() // editor_line_height
-
-        # Calculate the maximum line number width
-        max_line_number_width = len(str(total_lines))
-
-        # Generate the line numbers
-        lines = ""
-        for line_number in range(first_visible_line + 1, first_visible_line + visible_lines + 1):
-            if line_number <= total_lines:
-                # Add a space before the line number for better centering
-                lines += f" {line_number}\n"
-
-        self.setPlainText(lines)
-
-        # Adjust the width of the LineCountWidget based on the maximum line number width
-        # Add extra space for better readability
-        line_number_width = self.fontMetrics().horizontalAdvance("9" * max_line_number_width) + 10
-        self.setFixedWidth(line_number_width + 10)
+        if not first_visible_block.isValid():
+            return
+            
+        # Use Qt's built-in block layout system for perfect alignment
+        block = first_visible_block
+        block_number = block.blockNumber()
+        
+        # Get the block's bounding rectangle within the editor's viewport
+        block_rect = self.editor.blockBoundingGeometry(block)
+        content_offset = self.editor.contentOffset()
+        
+        # Calculate the exact Y position where the first visible block starts
+        block_top = block_rect.translated(content_offset).top()
+        
+        # Start drawing from the exact position of the text
+        current_y = block_top + font_metrics.ascent()
+        
+        # Draw line numbers for each visible block
+        while block.isValid() and current_y < self.height():
+            display_line = block_number + 1
+            
+            # Choose color and prefix based on line state
+            if display_line in self.breakpoints:
+                painter.setPen(QtGui.QColor("#d32f2f"))  # Red for breakpoints
+                prefix = "●"
+            elif block_number == current_line:
+                painter.setPen(QtGui.QColor("#1976d2"))  # Blue for current line
+                prefix = "→"
+            else:
+                painter.setPen(QtGui.QColor("#666666"))  # Gray for normal lines
+                prefix = " "
+            
+            # Format and draw the line number
+            if prefix in ["●", "→"]:
+                text = f"{prefix}{display_line}"
+            else:
+                text = f"{display_line}"
+            
+            # Right-align the text
+            text_width = font_metrics.horizontalAdvance(text)
+            x_position = self.width() - text_width - 8
+            
+            # Draw the line number if it's within the visible area
+            if current_y > 0 and current_y < self.height():
+                painter.drawText(x_position, int(current_y), text)
+            
+            # Move to the next block
+            block = block.next()
+            if block.isValid():
+                block_number = block.blockNumber()
+                # Get the exact position of the next block
+                next_block_rect = self.editor.blockBoundingGeometry(block)
+                current_y = next_block_rect.translated(content_offset).top() + font_metrics.ascent()
+            else:
+                break
+        
+        # Draw right border
+        painter.setPen(QtGui.QColor("#d0d0d0"))
+        painter.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
+    
+    def mousePressEvent(self, event):
+        """Advanced mouse click handling using block-based positioning"""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            click_y = event.pos().y()
+            font_metrics = self.editor.fontMetrics()
+            
+            # Find which line was clicked using the same block system as painting
+            first_visible_block = self.editor.firstVisibleBlock()
+            if not first_visible_block.isValid():
+                return
+                
+            block = first_visible_block
+            content_offset = self.editor.contentOffset()
+            
+            clicked_line = None
+            
+            # Iterate through visible blocks to find which one was clicked
+            while block.isValid():
+                block_rect = self.editor.blockBoundingGeometry(block)
+                block_top = block_rect.translated(content_offset).top()
+                block_bottom = block_top + block_rect.height()
+                
+                # Check if click was within this block's area
+                if block_top <= click_y <= block_bottom:
+                    clicked_line = block.blockNumber() + 1
+                    break
+                    
+                # Stop if we've gone past the click position
+                if block_top > click_y:
+                    break
+                    
+                block = block.next()
+            
+            # Toggle breakpoint if we found a valid line
+            if clicked_line is not None:
+                total_lines = self.editor.blockCount()
+                if 1 <= clicked_line <= total_lines:
+                    # Toggle breakpoint
+                    if clicked_line in self.breakpoints:
+                        self.breakpoints.remove(clicked_line)
+                    else:
+                        self.breakpoints.add(clicked_line)
+                    
+                    self.line_clicked.emit(clicked_line)
+                    self.update()  # Repaint to show breakpoint change
+        
+        super().mousePressEvent(event)
+    
+    def eventFilter(self, obj, event):
+        """Handle editor events for perfect synchronization"""
+        if obj == self.editor:
+            if event.type() in [QtCore.QEvent.Type.Resize, QtCore.QEvent.Type.Show, QtCore.QEvent.Type.Paint]:
+                QtCore.QTimer.singleShot(0, self.update_line_numbers)
+        
+        return super().eventFilter(obj, event)
+    
+    def sync_font_with_editor(self):
+        """Continuously synchronize font with editor"""
+        editor_font = self.editor.font()
+        if self.font() != editor_font:
+            self.setFont(editor_font)
+            self.update_line_numbers()
+    
+    def sizeHint(self):
+        """Provide size hint for layout"""
+        return QtCore.QSize(80, 0)
 
 class AutoIndentFilter(QtCore.QObject):
     def __init__(self, editor):
@@ -460,609 +592,2275 @@ class AutoIndentFilter(QtCore.QObject):
             cursor.insertText(' ' * 4)
         self.editor.setTextCursor(cursor)
 
-class SyntaxHighlighter(QtGui.QSyntaxHighlighter):
+class AdvancedPythonSyntaxHighlighter(QtGui.QSyntaxHighlighter):
+    """
+    Advanced Python Syntax Highlighter with Tokyo Night Theme
+    Professional IDE-grade syntax highlighting for Python with modern colors
+    """
+    
     def __init__(self, document):
         super().__init__(document)
-
+        
+        # Initialize highlighting rules
         self.highlighting_rules = []
-
-        # Highlight parentheses
-        self.parentheses_format = QtGui.QTextCharFormat()
-        self.parentheses_format.setForeground(QtGui.QColor("#DF8C8C"))
-        self.parentheses_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        self.multiline_quote_states = {'triple_single': 1, 'triple_double': 2}
         
-        # Add rule for parentheses, brackets and braces
-        self.add_rule(QtCore.QRegularExpression("[\\(\\)\\[\\]\\{\\}]"), self.parentheses_format)
-
-        # Variables (only if there's an assignment)
-        variable_format = QtGui.QTextCharFormat()
-        variable_format.setForeground(QtGui.QColor("#60A8A6"))
-        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_]\w*\b(?=.*=)"), variable_format)
-
-        # Highlight import statements
-        import_format = QtGui.QTextCharFormat()
-        import_format.setForeground(QtGui.QColor("#DE935F"))
-        
-        # Normal import format for existing modules
-        self.add_rule(QtCore.QRegularExpression(r"\bimport\s+([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\b"), import_format)
-        self.add_rule(QtCore.QRegularExpression(r"\bfrom\s+[a-zA-Z_]\w*\s+import\b"), import_format)
-
-        # Keyword format
-        keyword_format = QtGui.QTextCharFormat()
-        keyword_format.setForeground(QtGui.QColor("#7E9CD8"))
-        keyword_format.setFontWeight(QtGui.QFont.Weight.Bold)
-        keywords = keyword.kwlist
-        self.add_keywords(keywords, keyword_format)
-
-        # Built-in functions format
-        builtin_format = QtGui.QTextCharFormat()
-        builtin_format.setForeground(QtGui.QColor("#8EC07C"))
-        
-        # Create a list of built-in function names
-        builtin_funcs = dir(__builtins__)
-        
-        # Add specific rules for built-in functions
-        for func in builtin_funcs:
-            if not keyword.iskeyword(func) and func[0] != '_':
-                self.add_rule(QtCore.QRegularExpression(r"\b" + func + r"\b"), builtin_format)
-        
-        # Also highlight general function calls with a different style
-        function_call_format = QtGui.QTextCharFormat()
-        function_call_format.setForeground(QtGui.QColor("#8EC07C"))
-        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"), function_call_format)
+        # Tokyo Night Color Palette
+        self.colors = {
+            # Base colors
+            'background': '#1a1b26',
+            'foreground': '#a9b1d6',
+            'comment': '#565f89',
+            'selection': '#33467c',
             
-        # Comment format
-        comment_format = QtGui.QTextCharFormat()
-        comment_format.setForeground(QtGui.QColor("#717C7C"))
-        self.add_rule(QtCore.QRegularExpression(r"#.*"), comment_format)
+            # Syntax colors
+            'keyword': '#bb9af7',          # Purple - keywords (def, class, if, etc.)
+            'builtin': '#7dcfff',          # Cyan - built-in functions
+            'string': '#9ece6a',           # Green - strings
+            'number': '#ff9e64',           # Orange - numbers
+            'operator': '#89ddff',         # Light blue - operators
+            'punctuation': '#c0caf5',      # Light gray - punctuation
+            'function': '#7aa2f7',         # Blue - function names
+            'class_name': '#f7768e',       # Red - class names
+            'decorator': '#e0af68',        # Yellow - decorators
+            'constant': '#ff9e64',         # Orange - constants
+            'variable': '#c0caf5',         # Light gray - variables
+            'error': '#f7768e',            # Red - errors
+            'docstring': '#565f89',        # Dark gray - docstrings
+            'magic_method': '#bb9af7',     # Purple - magic methods
+            'self_cls': '#f7768e',         # Red - self/cls
+            'import_keyword': '#bb9af7',   # Purple - import/from
+            'module_name': '#7dcfff',      # Cyan - module names
+            'exception': '#f7768e',        # Red - exceptions
+            'type_hint': '#e0af68',        # Yellow - type hints
+            'boolean': '#ff9e64',          # Orange - True/False/None
+            'regex': '#73daca',            # Teal - regex patterns
+            'fstring': '#9ece6a',          # Green - f-strings
+            'fstring_expr': '#89ddff',     # Light blue - f-string expressions
+        }
         
-        # Triple-quoted string format
-        triple_string_format = QtGui.QTextCharFormat()
-        triple_string_format.setForeground(QtGui.QColor("#717C7C"))
-        # Handle triple double quotes
-        self.add_rule(QtCore.QRegularExpression(r'""".*?"""', QtCore.QRegularExpression.PatternOption.DotMatchesEverythingOption), triple_string_format)
-        # Handle triple single quotes
-        self.add_rule(QtCore.QRegularExpression(r"'''.*?'''", QtCore.QRegularExpression.PatternOption.DotMatchesEverythingOption), triple_string_format)
-
-        # String format (regular single and double quotes) - must come after triple quotes
-        string_format = QtGui.QTextCharFormat()
-        string_format.setForeground(QtGui.QColor("brown"))
-        # Make sure we don't match triple quotes with these patterns
-        self.add_rule(QtCore.QRegularExpression(r'(?<![""])"(?!").*?(?<![""])"'), string_format)
-        self.add_rule(QtCore.QRegularExpression(r"(?<![''])'(?!').*?(?<![''])'"), string_format)
-
-        # Function definition format
-        function_format = QtGui.QTextCharFormat()
-        function_format.setForeground(QtGui.QColor("#7FB4CA"))
-        function_format.setFontWeight(QtGui.QFont.Weight.Bold)
-        self.add_rule(QtCore.QRegularExpression(r"\bdef\b\s*(\w+)"), function_format)
-
-        # Class definition format
-        class_format = QtGui.QTextCharFormat()
-        class_format.setForeground(QtGui.QColor("#A48EC7"))
-        class_format.setFontWeight(QtGui.QFont.Weight.Bold)
-        self.add_rule(QtCore.QRegularExpression(r"\bclass\b\s*(\w+)"), class_format)
-
-        # Decorator format
-        decorator_format = QtGui.QTextCharFormat()
-        decorator_format.setForeground(QtGui.QColor("#D27E99"))
-        self.add_rule(QtCore.QRegularExpression(r"@\w+"), decorator_format)
-
-        # Numbers format
-        number_format = QtGui.QTextCharFormat()
-        number_format.setForeground(QtGui.QColor("#FF9E3B"))
-        self.add_rule(QtCore.QRegularExpression(r"\b\d+(\.\d+)?\b"), number_format)
+        # Initialize all formatting rules
+        self._init_advanced_formats()
+        self._init_syntax_rules()
+    
+    def _init_advanced_formats(self):
+        """Initialize all text format objects with Tokyo Night colors"""
         
-        # Highlighting for None, True, False
-        constant_format = QtGui.QTextCharFormat()
-        constant_format.setForeground(QtGui.QColor("#FF9E3B"))
-        self.add_keywords(["None", "True", "False"], constant_format)
+        # Keywords (def, class, if, for, etc.)
+        self.keyword_format = QtGui.QTextCharFormat()
+        self.keyword_format.setForeground(QtGui.QColor(self.colors['keyword']))
+        self.keyword_format.setFontWeight(QtGui.QFont.Weight.Bold)
         
-        # Highlighting for special methods
-        special_method_format = QtGui.QTextCharFormat()
-        special_method_format.setForeground(QtGui.QColor("#D54E53"))
-        self.add_rule(QtCore.QRegularExpression(r"\b__(\w+)__\b"), special_method_format)
+        # Built-in functions and types
+        self.builtin_format = QtGui.QTextCharFormat()
+        self.builtin_format.setForeground(QtGui.QColor(self.colors['builtin']))
+        self.builtin_format.setFontWeight(QtGui.QFont.Weight.Bold)
         
-        # Highlighting for special attributes
-        special_attribute_format = QtGui.QTextCharFormat()
-        special_attribute_format.setForeground(QtGui.QColor("#D54E53"))
-        self.add_rule(QtCore.QRegularExpression(r"\b__\w+\b"), special_attribute_format)
+        # String literals
+        self.string_format = QtGui.QTextCharFormat()
+        self.string_format.setForeground(QtGui.QColor(self.colors['string']))
         
-        # Highlighting for special variables
-        special_variable_format = QtGui.QTextCharFormat()
-        special_variable_format.setForeground(QtGui.QColor("#D54E53"))
-        self.add_rule(QtCore.QRegularExpression(r"\b_[a-zA-Z_]\w*\b"), special_variable_format)
+        # F-strings
+        self.fstring_format = QtGui.QTextCharFormat()
+        self.fstring_format.setForeground(QtGui.QColor(self.colors['fstring']))
+        self.fstring_format.setFontWeight(QtGui.QFont.Weight.Bold)
         
-        # Highlighting for special constants
-        special_constant_format = QtGui.QTextCharFormat()
-        special_constant_format.setForeground(QtGui.QColor("#D54E53"))
-        self.add_rule(QtCore.QRegularExpression(r"\b[A-Z_][A-Z0-9_]*\b"), special_constant_format)
-
-    def add_keywords(self, keywords, format):
-        for word in keywords:
-            pattern = QtCore.QRegularExpression(r"\b" + word + r"\b")
-            self.add_rule(pattern, format)
-
+        # F-string expressions
+        self.fstring_expr_format = QtGui.QTextCharFormat()
+        self.fstring_expr_format.setForeground(QtGui.QColor(self.colors['fstring_expr']))
+        self.fstring_expr_format.setBackground(QtGui.QColor("#2a2e3a"))
+        
+        # Raw strings
+        self.raw_string_format = QtGui.QTextCharFormat()
+        self.raw_string_format.setForeground(QtGui.QColor(self.colors['string']))
+        self.raw_string_format.setFontItalic(True)
+        
+        # Numbers
+        self.number_format = QtGui.QTextCharFormat()
+        self.number_format.setForeground(QtGui.QColor(self.colors['number']))
+        self.number_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Operators
+        self.operator_format = QtGui.QTextCharFormat()
+        self.operator_format.setForeground(QtGui.QColor(self.colors['operator']))
+        self.operator_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Punctuation
+        self.punctuation_format = QtGui.QTextCharFormat()
+        self.punctuation_format.setForeground(QtGui.QColor(self.colors['punctuation']))
+        
+        # Delimiters (parentheses, brackets, braces)
+        self.delimiter_format = QtGui.QTextCharFormat()
+        self.delimiter_format.setForeground(QtGui.QColor(self.colors['operator']))
+        self.delimiter_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Function definitions and calls
+        self.function_def_format = QtGui.QTextCharFormat()
+        self.function_def_format.setForeground(QtGui.QColor(self.colors['function']))
+        self.function_def_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        self.function_call_format = QtGui.QTextCharFormat()
+        self.function_call_format.setForeground(QtGui.QColor(self.colors['function']))
+        
+        # Class definitions
+        self.class_format = QtGui.QTextCharFormat()
+        self.class_format.setForeground(QtGui.QColor(self.colors['class_name']))
+        self.class_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Decorators
+        self.decorator_format = QtGui.QTextCharFormat()
+        self.decorator_format.setForeground(QtGui.QColor(self.colors['decorator']))
+        self.decorator_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Comments
+        self.comment_format = QtGui.QTextCharFormat()
+        self.comment_format.setForeground(QtGui.QColor(self.colors['comment']))
+        self.comment_format.setFontItalic(True)
+        
+        # Docstrings
+        self.docstring_format = QtGui.QTextCharFormat()
+        self.docstring_format.setForeground(QtGui.QColor(self.colors['docstring']))
+        self.docstring_format.setFontItalic(True)
+        
+        # Magic methods (__init__, __str__, etc.)
+        self.magic_method_format = QtGui.QTextCharFormat()
+        self.magic_method_format.setForeground(QtGui.QColor(self.colors['magic_method']))
+        self.magic_method_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Constants (ALL_CAPS)
+        self.constant_format = QtGui.QTextCharFormat()
+        self.constant_format.setForeground(QtGui.QColor(self.colors['constant']))
+        self.constant_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # self and cls
+        self.self_cls_format = QtGui.QTextCharFormat()
+        self.self_cls_format.setForeground(QtGui.QColor(self.colors['self_cls']))
+        self.self_cls_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        self.self_cls_format.setFontItalic(True)
+        
+        # Import keywords
+        self.import_format = QtGui.QTextCharFormat()
+        self.import_format.setForeground(QtGui.QColor(self.colors['import_keyword']))
+        self.import_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Module names
+        self.module_format = QtGui.QTextCharFormat()
+        self.module_format.setForeground(QtGui.QColor(self.colors['module_name']))
+        
+        # Exception types
+        self.exception_format = QtGui.QTextCharFormat()
+        self.exception_format.setForeground(QtGui.QColor(self.colors['exception']))
+        self.exception_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Type hints
+        self.type_hint_format = QtGui.QTextCharFormat()
+        self.type_hint_format.setForeground(QtGui.QColor(self.colors['type_hint']))
+        
+        # Boolean and None
+        self.boolean_format = QtGui.QTextCharFormat()
+        self.boolean_format.setForeground(QtGui.QColor(self.colors['boolean']))
+        self.boolean_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        
+        # Variables
+        self.variable_format = QtGui.QTextCharFormat()
+        self.variable_format.setForeground(QtGui.QColor(self.colors['variable']))
+        
+        # Error highlighting
+        self.error_format = QtGui.QTextCharFormat()
+        self.error_format.setForeground(QtGui.QColor(self.colors['error']))
+        self.error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
+        self.error_format.setUnderlineColor(QtGui.QColor(self.colors['error']))
+        
+        # Special annotations (TODO, FIXME, etc.)
+        self.annotation_format = QtGui.QTextCharFormat()
+        self.annotation_format.setForeground(QtGui.QColor('#e0af68'))
+        self.annotation_format.setBackground(QtGui.QColor('#2a2e3a'))
+        self.annotation_format.setFontWeight(QtGui.QFont.Weight.Bold)
+    
+    def _init_syntax_rules(self):
+        """Initialize comprehensive Python syntax highlighting rules"""
+        
+        # 1. KEYWORDS - Python language keywords
+        python_keywords = [
+            'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+            'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+            'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+            'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
+            'try', 'while', 'with', 'yield', 'match', 'case'
+        ]
+        for keyword in python_keywords:
+            self.add_rule(QtCore.QRegularExpression(f"\\b{keyword}\\b"), self.keyword_format)
+        
+        # 2. BUILT-IN FUNCTIONS AND TYPES
+        python_builtins = [
+            'abs', 'all', 'any', 'ascii', 'bin', 'bool', 'breakpoint', 'bytearray', 'bytes',
+            'callable', 'chr', 'classmethod', 'compile', 'complex', 'delattr',
+            'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec', 'filter',
+            'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr',
+            'hash', 'help', 'hex', 'id', 'input', 'int', 'isinstance',
+            'issubclass', 'iter', 'len', 'list', 'locals', 'map', 'max',
+            'memoryview', 'min', 'next', 'object', 'oct', 'open', 'ord',
+            'pow', 'print', 'property', 'range', 'repr', 'reversed', 'round',
+            'set', 'setattr', 'slice', 'sorted', 'staticmethod', 'str', 'sum',
+            'super', 'tuple', 'type', 'vars', 'zip', '__import__'
+        ]
+        for builtin in python_builtins:
+            self.add_rule(QtCore.QRegularExpression(f"\\b{builtin}\\b"), self.builtin_format)
+        
+        # 3. EXCEPTION TYPES
+        python_exceptions = [
+            'ArithmeticError', 'AssertionError', 'AttributeError', 'BaseException',
+            'BlockingIOError', 'BrokenPipeError', 'BufferError', 'BytesWarning',
+            'ChildProcessError', 'ConnectionAbortedError', 'ConnectionError',
+            'ConnectionRefusedError', 'ConnectionResetError', 'DeprecationWarning',
+            'EOFError', 'Ellipsis', 'EnvironmentError', 'Exception',
+            'FileExistsError', 'FileNotFoundError', 'FloatingPointError',
+            'FutureWarning', 'GeneratorExit', 'IOError', 'ImportError',
+            'ImportWarning', 'IndentationError', 'IndexError', 'InterruptedError',
+            'IsADirectoryError', 'KeyError', 'KeyboardInterrupt', 'LookupError',
+            'MemoryError', 'ModuleNotFoundError', 'NameError', 'NotADirectoryError',
+            'NotImplemented', 'NotImplementedError', 'OSError', 'OverflowError',
+            'PendingDeprecationWarning', 'PermissionError', 'ProcessLookupError',
+            'RecursionError', 'ReferenceError', 'ResourceWarning', 'RuntimeError',
+            'RuntimeWarning', 'StopAsyncIteration', 'StopIteration', 'SyntaxError',
+            'SyntaxWarning', 'SystemError', 'SystemExit', 'TabError', 'TimeoutError',
+            'TypeError', 'UnboundLocalError', 'UnicodeDecodeError', 'UnicodeEncodeError',
+            'UnicodeError', 'UnicodeTranslateError', 'UnicodeWarning', 'UserWarning',
+            'ValueError', 'Warning', 'WindowsError', 'ZeroDivisionError'
+        ]
+        for exception in python_exceptions:
+            self.add_rule(QtCore.QRegularExpression(f"\\b{exception}\\b"), self.exception_format)
+        
+        # 4. TYPE HINTS AND ANNOTATIONS
+        type_hints = [
+            'Any', 'Union', 'Optional', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSet',
+            'Callable', 'Iterable', 'Iterator', 'Generator', 'Coroutine',
+            'AsyncIterable', 'AsyncIterator', 'AsyncGenerator', 'Awaitable',
+            'ClassVar', 'Final', 'Literal', 'TypeVar', 'Generic', 'Protocol',
+            'NoReturn', 'NewType', 'TypedDict', 'NamedTuple'
+        ]
+        for hint in type_hints:
+            self.add_rule(QtCore.QRegularExpression(f"\\b{hint}\\b"), self.type_hint_format)
+        
+        # 5. NUMBERS - All Python number formats
+        # Integers
+        self.add_rule(QtCore.QRegularExpression(r"\b\d+(?![.\w])\b"), self.number_format)
+        # Floats
+        self.add_rule(QtCore.QRegularExpression(r"\b\d*\.\d+([eE][+-]?\d+)?\b"), self.number_format)
+        # Scientific notation
+        self.add_rule(QtCore.QRegularExpression(r"\b\d+[eE][+-]?\d+\b"), self.number_format)
+        # Hexadecimal
+        self.add_rule(QtCore.QRegularExpression(r"\b0[xX][0-9a-fA-F]+\b"), self.number_format)
+        # Binary
+        self.add_rule(QtCore.QRegularExpression(r"\b0[bB][01]+\b"), self.number_format)
+        # Octal
+        self.add_rule(QtCore.QRegularExpression(r"\b0[oO][0-7]+\b"), self.number_format)
+        # Complex numbers
+        self.add_rule(QtCore.QRegularExpression(r"\b\d*\.?\d+[jJ]\b"), self.number_format)
+        # Underscored numbers (Python 3.6+)
+        self.add_rule(QtCore.QRegularExpression(r"\b\d+(_\d+)*(\.\d+(_\d+)*)?([eE][+-]?\d+(_\d+)*)?\b"), self.number_format)
+        
+        # 6. OPERATORS
+        # Assignment operators (must come before single =)
+        self.add_rule(QtCore.QRegularExpression(r"(\+=|\-=|\*=|/=|%=|@=|&=|\|=|\^=|>>=|<<=|\*\*=|//=)"), self.operator_format)
+        # Comparison operators
+        self.add_rule(QtCore.QRegularExpression(r"(==|!=|<=|>=|<|>)"), self.operator_format)
+        # Bitwise operators
+        self.add_rule(QtCore.QRegularExpression(r"(<<|>>|\*\*|//)"), self.operator_format)
+        # Single character operators
+        self.add_rule(QtCore.QRegularExpression(r"[+\-*/%@&|^~]"), self.operator_format)
+        # Assignment
+        self.add_rule(QtCore.QRegularExpression(r"(?<![=!<>])=(?!=)"), self.operator_format)
+        
+        # 7. DELIMITERS AND PUNCTUATION
+        self.add_rule(QtCore.QRegularExpression(r"[\(\)\[\]\{\}]"), self.delimiter_format)
+        self.add_rule(QtCore.QRegularExpression(r"[,;:]"), self.punctuation_format)
+        
+        # 8. FUNCTION AND CLASS DEFINITIONS
+        # Function definitions (including async)
+        self.add_rule(QtCore.QRegularExpression(r"\b(async\s+)?def\s+([a-zA-Z_][a-zA-Z0-9_]*)"), self.function_def_format)
+        # Class definitions
+        self.add_rule(QtCore.QRegularExpression(r"\bclass\s+([a-zA-Z_][a-zA-Z0-9_]*)"), self.class_format)
+        
+        # 9. FUNCTION CALLS
+        self.add_rule(QtCore.QRegularExpression(r"\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()"), self.function_call_format)
+        
+        # 10. DECORATORS
+        self.add_rule(QtCore.QRegularExpression(r"@[a-zA-Z_][a-zA-Z0-9_.]*"), self.decorator_format)
+        
+        # 11. MAGIC METHODS
+        self.add_rule(QtCore.QRegularExpression(r"\b__[a-zA-Z_][a-zA-Z0-9_]*__\b"), self.magic_method_format)
+        
+        # 12. CONSTANTS (ALL_CAPS)
+        self.add_rule(QtCore.QRegularExpression(r"\b[A-Z][A-Z0-9_]{2,}\b"), self.constant_format)
+        
+        # 13. SELF AND CLS
+        self.add_rule(QtCore.QRegularExpression(r"\b(self|cls)\b"), self.self_cls_format)
+        
+        # 14. IMPORT STATEMENTS
+        self.add_rule(QtCore.QRegularExpression(r"\b(import|from)\b"), self.import_format)
+        
+        # 15. BOOLEAN VALUES AND NONE
+        self.add_rule(QtCore.QRegularExpression(r"\b(True|False|None)\b"), self.boolean_format)
+        
+        # 16. COMMENTS
+        self.add_rule(QtCore.QRegularExpression(r"#[^\r\n]*"), self.comment_format)
+        
+        # 17. SPECIAL ANNOTATIONS IN COMMENTS
+        self.add_rule(QtCore.QRegularExpression(r"#.*\b(TODO|FIXME|HACK|NOTE|XXX|BUG|WARNING)\b.*"), self.annotation_format)
+    
     def add_rule(self, pattern, format):
+        """Add a highlighting rule"""
         rule = (pattern, format)
         self.highlighting_rules.append(rule)
-
+    
     def highlightBlock(self, text):
-        # Apply basic syntax rules
-        for pattern, format in self.highlighting_rules:
+        """
+        Advanced highlight block with Tokyo Night theme and multi-line support
+        """
+        # Clear any previous formatting
+        self.setCurrentBlockState(0)
+        
+        # Handle multi-line strings first (highest priority)
+        self._highlight_multiline_strings(text)
+        
+        # Apply all syntax highlighting rules
+        for pattern, format_obj in self.highlighting_rules:
             expression = pattern.globalMatch(text)
             while expression.hasNext():
                 match = expression.next()
                 start = match.capturedStart()
                 length = match.capturedLength()
-                self.setFormat(start, length, format)
+                
+                # Only apply if not already formatted as string/comment
+                current_format = self.format(start)
+                if (current_format.foreground().color() != QtGui.QColor(self.colors['string']) and
+                    current_format.foreground().color() != QtGui.QColor(self.colors['docstring']) and
+                    current_format.foreground().color() != QtGui.QColor(self.colors['comment'])):
+                    self.setFormat(start, length, format_obj)
         
-        # Apply special import checking
-        self.highlightImports(text)
+        # Apply advanced string highlighting
+        self._highlight_advanced_strings(text)
         
-        # Apply matching parentheses highlighting
-        self.highlightMatchingBraces(text)
+        # Apply enhanced bracket matching
+        self._highlight_bracket_pairs(text)
+        
+        # Apply import validation
+        self._highlight_import_validation(text)
     
-    def highlightMatchingBraces(self, text):
+    def _highlight_multiline_strings(self, text):
+        """Handle multi-line string highlighting with state tracking"""
+        # Triple double quotes
+        self._process_multiline_quotes(text, '"""', self.multiline_quote_states['triple_double'], self.docstring_format)
+        # Triple single quotes
+        self._process_multiline_quotes(text, "'''", self.multiline_quote_states['triple_single'], self.docstring_format)
+    
+    def _process_multiline_quotes(self, text, delimiter, state_value, format_obj):
+        """Process multi-line quoted strings"""
+        start_index = 0
+        
+        # Check if we're continuing a multi-line string
+        if self.previousBlockState() == state_value:
+            # Look for the closing delimiter
+            end_index = text.find(delimiter)
+            if end_index >= 0:
+                # String ends in this block
+                self.setFormat(0, end_index + len(delimiter), format_obj)
+                start_index = end_index + len(delimiter)
+                self.setCurrentBlockState(0)
+            else:
+                # String continues to next block
+                self.setFormat(0, len(text), format_obj)
+                self.setCurrentBlockState(state_value)
+                return
+        
+        # Look for new multi-line strings
+        while start_index < len(text):
+            start_match = text.find(delimiter, start_index)
+            if start_match == -1:
+                break
+                
+            # Look for closing delimiter
+            end_match = text.find(delimiter, start_match + len(delimiter))
+            if end_match == -1:
+                # String continues to next block
+                self.setFormat(start_match, len(text) - start_match, format_obj)
+                self.setCurrentBlockState(state_value)
+                break
+            else:
+                # Complete string in this block
+                self.setFormat(start_match, end_match + len(delimiter) - start_match, format_obj)
+                start_index = end_match + len(delimiter)
+    
+    def _highlight_advanced_strings(self, text):
+        """Advanced string highlighting with f-string expression support"""
+        # Skip if already in multi-line string
+        if self.currentBlockState() != 0:
+            return
+            
+        # F-strings with expression highlighting
+        self._highlight_fstrings(text)
+        
+        # Raw strings
+        for pattern in [r'r"[^"\\]*(?:\\.[^"\\]*)*"', r"r'[^'\\]*(?:\\.[^'\\]*)*'"]:
+            regex = QtCore.QRegularExpression(pattern)
+            expression = regex.globalMatch(text)
+            while expression.hasNext():
+                match = expression.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), self.raw_string_format)
+        
+        # Regular strings
+        for pattern in [r'"[^"\\]*(?:\\.[^"\\]*)*"', r"'[^'\\]*(?:\\.[^'\\]*)*'"]:
+            regex = QtCore.QRegularExpression(pattern)
+            expression = regex.globalMatch(text)
+            while expression.hasNext():
+                match = expression.next()
+                start = match.capturedStart()
+                length = match.capturedLength()
+                # Don't override f-strings or raw strings
+                if self.format(start).foreground().color() == QtGui.QColor(self.colors['foreground']):
+                    self.setFormat(start, length, self.string_format)
+    
+    def _highlight_fstrings(self, text):
+        """Highlight f-strings and their expressions"""
+        # F-string patterns
+        fstring_patterns = [r'f"[^"]*"', r"f'[^']*'"]
+        
+        for pattern in fstring_patterns:
+            regex = QtCore.QRegularExpression(pattern)
+            expression = regex.globalMatch(text)
+            while expression.hasNext():
+                match = expression.next()
+                start = match.capturedStart()
+                length = match.capturedLength()
+                
+                # Highlight entire f-string
+                self.setFormat(start, length, self.fstring_format)
+                
+                # Highlight expressions within {}
+                fstring_text = match.captured(0)
+                self._highlight_fstring_expressions(fstring_text, start)
+    
+    def _highlight_fstring_expressions(self, fstring_text, base_start):
+        """Highlight expressions within f-string braces"""
+        brace_level = 0
+        expr_start = -1
+        
+        for i, char in enumerate(fstring_text):
+            if char == '{' and (i == 0 or fstring_text[i-1] != '{'):
+                if brace_level == 0:
+                    expr_start = i + 1
+                brace_level += 1
+            elif char == '}' and (i == len(fstring_text)-1 or fstring_text[i+1] != '}'):
+                brace_level -= 1
+                if brace_level == 0 and expr_start != -1:
+                    # Highlight the expression
+                    expr_length = i - expr_start
+                    if expr_length > 0:
+                        self.setFormat(base_start + expr_start, expr_length, self.fstring_expr_format)
+                    expr_start = -1
+    
+    def _highlight_bracket_pairs(self, text):
+        """Enhanced bracket matching with Tokyo Night colors"""
         pairs = {'(': ')', '[': ']', '{': '}'}
         stack = []
-        matching_pairs = []  # Store all matching pairs
+        matching_pairs = []
         
-        # First pass: identify all matching pairs
-        for i, ch in enumerate(text):
-            if ch in pairs:
-                stack.append((ch, i))
-            elif ch in pairs.values():
-                if stack and pairs[stack[-1][0]] == ch:
-                    open_char, open_index = stack.pop()
-                    matching_pairs.append((open_index, i))  # Store the matching pair
+        # Find matching pairs
+        for i, char in enumerate(text):
+            if char in pairs:
+                stack.append((char, i))
+            elif char in pairs.values():
+                if stack:
+                    open_char, open_pos = stack[-1]
+                    if pairs[open_char] == char:
+                        stack.pop()
+                        matching_pairs.append((open_pos, i))
         
-        # Second pass: apply highlighting to all matching pairs
-        matching_format = QtGui.QTextCharFormat()
-        matching_format.setForeground(QtGui.QColor("#DF8C8C"))
-        matching_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        # Highlight matching pairs
+        pair_format = QtGui.QTextCharFormat()
+        pair_format.setForeground(QtGui.QColor(self.colors['operator']))
+        pair_format.setBackground(QtGui.QColor('#2a2e3a'))
+        pair_format.setFontWeight(QtGui.QFont.Weight.Bold)
         
-        for open_index, close_index in matching_pairs:
-            self.setFormat(open_index, 1, matching_format)
-            self.setFormat(close_index, 1, matching_format)
+        for open_pos, close_pos in matching_pairs:
+            self.setFormat(open_pos, 1, pair_format)
+            self.setFormat(close_pos, 1, pair_format)
     
-    def highlightImports(self, text):
+    def _highlight_import_validation(self, text):
+        """Validate and highlight import statements"""
         try:
-            # Match import statements
-            import_pattern = re.compile(r"\bimport\s+([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)")
-            from_import_pattern = re.compile(r"\bfrom\s+([a-zA-Z_]\w*)\s+import\b")
-            # New pattern to match the imported names in from...import statement
-            from_import_names_pattern = re.compile(r"\bfrom\s+([a-zA-Z_]\w*)\s+import\s+([a-zA-Z_*]\w*(?:\s*,\s*[a-zA-Z_*]\w*)*)")
+            import_patterns = [
+                (r'\bimport\s+([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)', 1),
+                (r'\bfrom\s+([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\s+import', 1)
+            ]
             
-            # Check if modules exist
-            for match in import_pattern.finditer(text):
-                full_import = match.group(1)
-                modules = [m.strip() for m in full_import.split(',')]
-                start_pos = match.start(1)  # Start position of the module list
-                
-                # Track current position
-                current_pos = start_pos
-                
-                for module in modules:
-                    # Find exact location of this module in the import statement
-                    module_start = text.find(module, current_pos)
-                    current_pos = module_start + len(module)
+            for pattern, group in import_patterns:
+                regex = QtCore.QRegularExpression(pattern)
+                expression = regex.globalMatch(text)
+                while expression.hasNext():
+                    match = expression.next()
+                    module_name = match.captured(group)
+                    module_start = match.capturedStart(group)
+                    module_length = match.capturedLength(group)
                     
+                    # Highlight module name
+                    self.setFormat(module_start, module_length, self.module_format)
+                    
+                    # Validate module existence
                     try:
-                        __import__(module)
+                        __import__(module_name.split('.')[0])
                     except ImportError:
-                        if module_start != -1:
-                            # Module doesn't exist, mark only this module in red
-                            error_format = QtGui.QTextCharFormat()
-                            error_format.setForeground(QtGui.QColor("red"))
-                            error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
-                            self.setFormat(module_start, len(module), error_format)
-            
-            # Check from ... import statements for module existence
-            for match in from_import_pattern.finditer(text):
-                module = match.group(1)
-                try:
-                    __import__(module)
-                except ImportError:
-                    # Module doesn't exist, mark in red
-                    error_format = QtGui.QTextCharFormat()
-                    error_format.setForeground(QtGui.QColor("red"))
-                    error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
-                    self.setFormat(match.start(1), len(module), error_format)
-            
-            # Check imported names in from ... import name1, name2 statements
-            for match in from_import_names_pattern.finditer(text):
-                module_name = match.group(1)
-                import_names = match.group(2)
-                names_list = [name.strip() for name in import_names.split(',')]
-                
-                # Try to import the module
-                try:
-                    module = __import__(module_name)
-                    
-                    # For submodules, we need to get the right module object
-                    components = module_name.split('.')
-                    for comp in components[1:]:
-                        module = getattr(module, comp)
-                    
-                    # Find position of each imported name and verify it exists
-                    current_pos = match.start(2)
-                    
-                    for name in names_list:
-                        # Handle wildcard imports
-                        if name == '*':
-                            continue
-                            
-                        # Find exact location of this name in the import statement
-                        name_start = text.find(name, current_pos)
-                        current_pos = name_start + len(name)
+                        # Mark as error if module doesn't exist
+                        self.setFormat(module_start, module_length, self.error_format)
                         
-                        # Check if the name exists in the module
-                        if not hasattr(module, name):
-                            error_format = QtGui.QTextCharFormat()
-                            error_format.setForeground(QtGui.QColor("red"))
-                            error_format.setUnderlineStyle(QtGui.QTextCharFormat.UnderlineStyle.WaveUnderline)
-                            self.setFormat(name_start, len(name), error_format)
-                            
-                except ImportError:
-                    # If module doesn't exist, we've already marked it in the previous loop
-                    pass
-                except AttributeError:
-                    # This can happen with complex imports
-                    pass
         except Exception:
-            # Silently ignore errors in import highlighting
+            # Silently handle any errors in import validation
             pass
         
-class debugger(QtWidgets.QDialog):
+class ProjectExplorer(QtWidgets.QDockWidget):
+    def __init__(self, parent=None):
+        super().__init__("Project Explorer", parent)
+        self.parent_window = parent
+        
+        # Create the main widget
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Add toolbar
+        toolbar = QtWidgets.QHBoxLayout()
+        self.open_folder_btn = QtWidgets.QPushButton("Open Folder")
+        self.refresh_btn = QtWidgets.QPushButton("Refresh")
+        toolbar.addWidget(self.open_folder_btn)
+        toolbar.addWidget(self.refresh_btn)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        
+        # Create tree view
+        self.tree_view = QtWidgets.QTreeView()
+        self.file_model = QtGui.QFileSystemModel()
+        self.file_model.setRootPath("")
+        self.tree_view.setModel(self.file_model)
+        
+        # Hide unnecessary columns
+        self.tree_view.hideColumn(1)  # Size
+        self.tree_view.hideColumn(2)  # Type  
+        self.tree_view.hideColumn(3)  # Date Modified
+        
+        layout.addWidget(self.tree_view)
+        self.setWidget(widget)
+        
+        # Connect signals
+        self.open_folder_btn.clicked.connect(self.open_folder)
+        self.refresh_btn.clicked.connect(self.refresh_tree)
+        self.tree_view.doubleClicked.connect(self.open_file)
+        
+        # Set initial directory to home
+        home_path = QtCore.QDir.homePath()
+        self.set_root_path(home_path)
+        
+    def open_folder(self):
+        """Open a folder dialog to select project root"""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Project Folder")
+        if folder:
+            self.set_root_path(folder)
+            
+    def set_root_path(self, path):
+        """Set the root path for the project explorer"""
+        index = self.file_model.setRootPath(path)
+        self.tree_view.setRootIndex(index)
+        self.tree_view.expandToDepth(1)
+        
+    def refresh_tree(self):
+        """Refresh the file tree"""
+        current_root = self.file_model.rootPath()
+        self.file_model.setRootPath(current_root)
+        
+    def open_file(self, index):
+        """Open file when double-clicked"""
+        if not self.file_model.isDir(index):
+            file_path = self.file_model.filePath(index)
+            if self.parent_window:
+                # Create new tab with the file
+                self.parent_window.createNewTab(file_path)
+
+class FindReplaceDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_editor = parent
+        self.setWindowTitle("Find and Replace")
+        self.setModal(False)
+        self.resize(400, 200)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Find section
+        find_layout = QtWidgets.QHBoxLayout()
+        find_layout.addWidget(QtWidgets.QLabel("Find:"))
+        self.find_edit = QtWidgets.QLineEdit()
+        find_layout.addWidget(self.find_edit)
+        layout.addLayout(find_layout)
+        
+        # Replace section
+        replace_layout = QtWidgets.QHBoxLayout()
+        replace_layout.addWidget(QtWidgets.QLabel("Replace:"))
+        self.replace_edit = QtWidgets.QLineEdit()
+        replace_layout.addWidget(self.replace_edit)
+        layout.addLayout(replace_layout)
+        
+        # Options
+        options_layout = QtWidgets.QHBoxLayout()
+        self.case_sensitive = QtWidgets.QCheckBox("Case sensitive")
+        self.whole_words = QtWidgets.QCheckBox("Whole words")
+        self.regex_mode = QtWidgets.QCheckBox("Regular expressions")
+        options_layout.addWidget(self.case_sensitive)
+        options_layout.addWidget(self.whole_words)
+        options_layout.addWidget(self.regex_mode)
+        layout.addLayout(options_layout)
+        
+        # Buttons
+        button_layout = QtWidgets.QHBoxLayout()
+        self.find_next_btn = QtWidgets.QPushButton("Find Next")
+        self.find_prev_btn = QtWidgets.QPushButton("Find Previous")
+        self.replace_btn = QtWidgets.QPushButton("Replace")
+        self.replace_all_btn = QtWidgets.QPushButton("Replace All")
+        self.close_btn = QtWidgets.QPushButton("Close")
+        
+        button_layout.addWidget(self.find_next_btn)
+        button_layout.addWidget(self.find_prev_btn)
+        button_layout.addWidget(self.replace_btn)
+        button_layout.addWidget(self.replace_all_btn)
+        button_layout.addWidget(self.close_btn)
+        layout.addLayout(button_layout)
+        
+        # Connect signals
+        self.find_next_btn.clicked.connect(self.find_next)
+        self.find_prev_btn.clicked.connect(self.find_previous)
+        self.replace_btn.clicked.connect(self.replace_current)
+        self.replace_all_btn.clicked.connect(self.replace_all)
+        self.close_btn.clicked.connect(self.close)
+        self.find_edit.returnPressed.connect(self.find_next)
+        
+    def find_next(self):
+        if self.parent_editor:
+            self.parent_editor.find_text_in_dialog(self.find_edit.text(), 
+                                                  case_sensitive=self.case_sensitive.isChecked(),
+                                                  whole_words=self.whole_words.isChecked(),
+                                                  regex=self.regex_mode.isChecked())
+    
+    def find_previous(self):
+        if self.parent_editor:
+            self.parent_editor.find_text_in_dialog(self.find_edit.text(), 
+                                                  reverse=True,
+                                                  case_sensitive=self.case_sensitive.isChecked(),
+                                                  whole_words=self.whole_words.isChecked(),
+                                                  regex=self.regex_mode.isChecked())
+    
+    def replace_current(self):
+        if self.parent_editor:
+            self.parent_editor.replace_current_selection(self.replace_edit.text())
+    
+    def replace_all(self):
+        if self.parent_editor:
+            count = self.parent_editor.replace_all_text(self.find_edit.text(), 
+                                                       self.replace_edit.text(),
+                                                       case_sensitive=self.case_sensitive.isChecked(),
+                                                       whole_words=self.whole_words.isChecked(),
+                                                       regex=self.regex_mode.isChecked())
+            QtWidgets.QMessageBox.information(self, "Replace All", f"Replaced {count} occurrences.")
+
+class DebugLineNumberArea(QtWidgets.QWidget):
+    """Line number area with breakpoint support for debugger"""
+    breakpoint_toggled = QtCore.pyqtSignal(int)
+    
     def __init__(self):
         super().__init__()
+        self.code_view = None
+        self.breakpoints = set()
+        self.setMinimumWidth(60)
+        
+    def set_code_view(self, code_view):
+        """Connect this line number area to a code view"""
+        self.code_view = code_view
+        self.code_view.textChanged.connect(self.update)
+        self.code_view.verticalScrollBar().valueChanged.connect(self.update)
+        
+    def paintEvent(self, event):
+        """Paint line numbers and breakpoints"""
+        if not self.code_view:
+            return
+            
+        painter = QtGui.QPainter(self)
+        painter.fillRect(event.rect(), QtGui.QColor("#f8f9fa"))
+        
+        # Get visible lines
+        block = self.code_view.firstVisibleBlock()
+        top = self.code_view.blockBoundingGeometry(block).translated(self.code_view.contentOffset()).top()
+        bottom = top + self.code_view.blockBoundingRect(block).height()
+        
+        font_metrics = self.fontMetrics()
+        
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                line_number = block.blockNumber() + 1
+                
+                # Draw breakpoint indicator
+                if line_number in self.breakpoints:
+                    painter.setBrush(QtGui.QColor("#dc3545"))
+                    painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                    painter.drawEllipse(5, int(top) + 2, 12, 12)
+                
+                # Draw line number
+                painter.setPen(QtGui.QColor("#6c757d"))
+                painter.drawText(20, int(top), self.width() - 25, font_metrics.height(),
+                               QtCore.Qt.AlignmentFlag.AlignRight, str(line_number))
+                
+            block = block.next()
+            top = bottom
+            bottom = top + self.code_view.blockBoundingRect(block).height()
+            
+    def mousePressEvent(self, event):
+        """Handle mouse clicks to toggle breakpoints"""
+        if not self.code_view:
+            return
+            
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # Calculate which line was clicked
+            block = self.code_view.firstVisibleBlock()
+            top = self.code_view.blockBoundingGeometry(block).translated(self.code_view.contentOffset()).top()
+            
+            while block.isValid():
+                bottom = top + self.code_view.blockBoundingRect(block).height()
+                if top <= event.pos().y() <= bottom:
+                    line_number = block.blockNumber() + 1
+                    self.breakpoint_toggled.emit(line_number)
+                    break
+                block = block.next()
+                top = bottom
+                
+    def update_breakpoints(self, breakpoints):
+        """Update the set of breakpoints"""
+        self.breakpoints = set(breakpoints.keys()) if isinstance(breakpoints, dict) else set(breakpoints)
+        self.update()
+
+class PythonSyntaxHighlighter(QtGui.QSyntaxHighlighter):
+    """Syntax highlighter for Python code in the debugger"""
+    
+    def __init__(self, document):
+        super().__init__(document)
+        
+        # Define highlighting rules
+        self.highlighting_rules = []
+        
+        # Keywords
+        keyword_format = QtGui.QTextCharFormat()
+        keyword_format.setForeground(QtGui.QColor("#0969da"))
+        keyword_format.setFontWeight(QtGui.QFont.Weight.Bold)
+        keywords = ['def', 'class', 'if', 'elif', 'else', 'for', 'while', 'try', 'except', 'finally',
+                   'import', 'from', 'as', 'return', 'yield', 'break', 'continue', 'pass', 'raise',
+                   'with', 'lambda', 'and', 'or', 'not', 'in', 'is', 'True', 'False', 'None']
+        for keyword in keywords:
+            self.highlighting_rules.append((f'\\b{keyword}\\b', keyword_format))
+            
+        # Strings
+        string_format = QtGui.QTextCharFormat()
+        string_format.setForeground(QtGui.QColor("#0a3069"))
+        self.highlighting_rules.append((r'"[^"]*"', string_format))
+        self.highlighting_rules.append((r"'[^']*'", string_format))
+        
+        # Comments
+        comment_format = QtGui.QTextCharFormat()
+        comment_format.setForeground(QtGui.QColor("#656d76"))
+        comment_format.setFontItalic(True)
+        self.highlighting_rules.append((r'#.*', comment_format))
+        
+        # Numbers
+        number_format = QtGui.QTextCharFormat()
+        number_format.setForeground(QtGui.QColor("#0550ae"))
+        self.highlighting_rules.append((r'\\b\\d+\\b', number_format))
+        
+    def highlightBlock(self, text):
+        """Apply syntax highlighting to a block of text"""
+        for pattern, format in self.highlighting_rules:
+            import re
+            for match in re.finditer(pattern, text):
+                start, end = match.span()
+                self.setFormat(start, end - start, format)
+
+class AdvancedDebugger(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("Python Debugger")
-        self.resize(800, 600)
+        self.resize(1200, 700)
+        self.setModal(False)
         
-        # Main layout
+        # Initialize state variables
+        self.debugger_active = False
+        self.current_line = None
+        self.breakpoints = {}
+        self.watch_expressions = []
+        self.call_stack = []
+        self.current_frame = None
+        self.current_editor = None
+        self.current_file = None
+        self.debug_process = None
+        self.profiler_enabled = False
+        
+        # Setup UI components
+        self.setup_ui()
+        self.setup_shortcuts()
+        
+        # Initialize debugging state
+        self.locals_data = {}
+        self.globals_data = {}
+        
+        # PDB debug server for managing debug sessions
+        self.debug_server = PdbDebugServer()
+        self.debug_server.state_changed.connect(self.on_debug_state_changed)
+        self.debug_server.output_received.connect(self.on_debug_output)
+        self.debug_server.error_occurred.connect(self.on_debug_error)
+        
+    def setup_ui(self):
+        """Setup the main UI layout with modern design"""
         main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(2, 2, 2, 2)
+        main_layout.setSpacing(2)
         
-        # Splitter for top and bottom parts
-        main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        # Create toolbar
+        self.create_toolbar(main_layout)
         
-        # Top part: Code view and variable inspector
-        top_widget = QtWidgets.QWidget()
-        top_layout = QtWidgets.QHBoxLayout(top_widget)
+        # Main content area with splitters
+        main_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        main_splitter.setChildrenCollapsible(False)
         
-        # Left side: Code view with line numbers
-        code_view_container = QtWidgets.QWidget()
-        code_view_layout = QtWidgets.QHBoxLayout(code_view_container)
-        code_view_layout.setContentsMargins(0, 0, 0, 0)
+        # Left panel: Code view with line numbers and breakpoints
+        left_panel = self.create_code_panel()
+        main_splitter.addWidget(left_panel)
         
-        # Create code view with plain text edit for better line number support
-        self.code_view = QtWidgets.QPlainTextEdit()
-        self.code_view.setReadOnly(True)
-        self.code_view.setFont(QtGui.QFont("Monospace", 10))
-        self.code_view.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
-        self.code_view.setStyleSheet("background-color: #f8f8f8;")
+        # Right panel: Debug information tabs
+        right_panel = self.create_info_panel()
+        main_splitter.addWidget(right_panel)
         
-        # Create line count widget for the code view
-        self.line_count = LineCountWidget(self.code_view)
-        
-        # Add line count widget and code view to the container layout
-        code_view_layout.addWidget(self.line_count)
-        code_view_layout.addWidget(self.code_view)
-        
-        # Right side: Variable inspector as a tree view
-        self.var_inspector = QtWidgets.QTreeWidget()
-        self.var_inspector.setHeaderLabels(["Name", "Type", "Value"])
-        self.var_inspector.setColumnWidth(0, 150)
-        self.var_inspector.setColumnWidth(1, 100)
-        
-        # Add code view and variable inspector to the top layout
-        top_layout.addWidget(code_view_container, 3)
-        top_layout.addWidget(self.var_inspector, 2)
-        
-        # Bottom part: Tabbed output, call stack, breakpoints
-        bottom_widget = QtWidgets.QTabWidget()
-        
-        # Output tab - Console output from the program
-        self.debug_output = QtWidgets.QTextEdit()
-        self.debug_output.setReadOnly(True)
-        self.debug_output.setFont(QtGui.QFont("Monospace", 10))
-        bottom_widget.addTab(self.debug_output, "Output")
-        
-        # Call Stack tab
-        self.call_stack = QtWidgets.QTableWidget()
-        self.call_stack.setColumnCount(3)
-        self.call_stack.setHorizontalHeaderLabels(["Function", "File", "Line"])
-        self.call_stack.horizontalHeader().setStretchLastSection(True)
-        bottom_widget.addTab(self.call_stack, "Call Stack")
-        
-        # Breakpoints tab
-        self.breakpoints_list = QtWidgets.QTableWidget()
-        self.breakpoints_list.setColumnCount(3)
-        self.breakpoints_list.setHorizontalHeaderLabels(["File", "Line", "Condition"])
-        self.breakpoints_list.horizontalHeader().setStretchLastSection(True)
-        self.breakpoints_list.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        bottom_widget.addTab(self.breakpoints_list, "Breakpoints")
-        
-        # Watch expressions tab
-        self.watch_list = QtWidgets.QTableWidget()
-        self.watch_list.setColumnCount(2)
-        self.watch_list.setHorizontalHeaderLabels(["Expression", "Value"])
-        self.watch_list.horizontalHeader().setStretchLastSection(True)
-        bottom_widget.addTab(self.watch_list, "Watch")
-        
-        # Add widgets to main splitter
-        main_splitter.addWidget(top_widget)
-        main_splitter.addWidget(bottom_widget)
-        main_splitter.setSizes([400, 200])
-        
+        # Set initial sizes (75% code, 25% info) - more compact
+        main_splitter.setSizes([900, 300])
         main_layout.addWidget(main_splitter)
         
-        # Control panel with debug buttons
-        control_layout = QtWidgets.QHBoxLayout()
-        
-        self.run_button = QtWidgets.QPushButton("Run")
-        self.run_button.setIcon(QtGui.QIcon.fromTheme("media-playback-start"))
-        self.run_button.clicked.connect(self.debug_run)
-        control_layout.addWidget(self.run_button)
-        
-        self.pause_button = QtWidgets.QPushButton("Pause")
-        self.pause_button.setIcon(QtGui.QIcon.fromTheme("media-playback-pause"))
-        self.pause_button.clicked.connect(self.debug_pause)
-        control_layout.addWidget(self.pause_button)
-        
-        self.stop_button = QtWidgets.QPushButton("Stop")
-        self.stop_button.setIcon(QtGui.QIcon.fromTheme("media-playback-stop"))
-        self.stop_button.clicked.connect(self.debug_stop)
-        control_layout.addWidget(self.stop_button)
-        
-        control_layout.addWidget(QtWidgets.QLabel("|"))
-        
-        self.step_into_button = QtWidgets.QPushButton("Step Into")
-        self.step_into_button.setToolTip("Step into function calls (s)")
-        self.step_into_button.clicked.connect(self.debug_step_into)
-        control_layout.addWidget(self.step_into_button)
-        
-        self.step_over_button = QtWidgets.QPushButton("Step Over")
-        self.step_over_button.setToolTip("Step over function calls (n)")
-        self.step_over_button.clicked.connect(self.debug_step_over)
-        control_layout.addWidget(self.step_over_button)
-        
-        self.step_out_button = QtWidgets.QPushButton("Step Out")
-        self.step_out_button.setToolTip("Step out of current function (r)")
-        self.step_out_button.clicked.connect(self.debug_step_out)
-        control_layout.addWidget(self.step_out_button)
-        
-        self.continue_button = QtWidgets.QPushButton("Continue")
-        self.continue_button.setToolTip("Continue execution until next breakpoint (c)")
-        self.continue_button.clicked.connect(self.debug_continue)
-        control_layout.addWidget(self.continue_button)
-        
-        control_layout.addWidget(QtWidgets.QLabel("|"))
-        
-        self.cmd_entry = QtWidgets.QLineEdit()
-        self.cmd_entry.setPlaceholderText("Enter debugger commands (e.g., p variable_name)")
-        self.cmd_entry.returnPressed.connect(self.execute_command)
-        control_layout.addWidget(self.cmd_entry, 1)
-        
-        main_layout.addLayout(control_layout)
-        
+        # Status bar with execution information
         self.status_bar = QtWidgets.QStatusBar()
         self.status_bar.showMessage("Ready")
         main_layout.addWidget(self.status_bar)
         
-        # Initialize command history
-        self.command_history = []
-        self.history_position = 0
+        # Apply modern styling
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QToolBar {
+                background-color: #e9ecef;
+                border: none;
+                padding: 5px;
+            }
+            QSplitter::handle {
+                background-color: #dee2e6;
+                width: 2px;
+            }
+            QStatusBar {
+                background-color: #e9ecef;
+                border-top: 1px solid #dee2e6;
+            }
+        """)
         
-        # Set up command history navigation
-        QtGui.QShortcut(QtGui.QKeySequence("Up"), self.cmd_entry, self.history_prev)
-        QtGui.QShortcut(QtGui.QKeySequence("Down"), self.cmd_entry, self.history_next)
+    def create_toolbar(self, parent_layout):
+        """Create debugging toolbar with all essential controls"""
+        toolbar = QtWidgets.QToolBar()
+        toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setIconSize(QtCore.QSize(14, 14))
+        toolbar.setMaximumHeight(32)
         
-        # Initialize debugger process
-        self.debug_process = None
-        self.debugger_active = False
-        self.current_line = None
-        self.breakpoints = []
-        self.current_globals = {}
-        self.current_locals = {}
-        self.code_to_debug = None
-        self.current_file = None
+        # Debug control actions
+        self.run_action = toolbar.addAction("▶️ Run", self.debug_run)
+        self.run_action.setShortcut("F5")
+        self.run_action.setToolTip("Start debugging (F5)")
         
-        # Command processing variables
-        self.last_command = ""
-        self.processing_command = False
+        self.pause_action = toolbar.addAction("⏸️ Pause", self.debug_pause)
+        self.pause_action.setShortcut("F6")
+        self.pause_action.setToolTip("Pause execution (F6)")
+        self.pause_action.setEnabled(False)
         
-        self.setWindowFlags(QtCore.Qt.WindowType.Dialog)
+        self.stop_action = toolbar.addAction("⏹️ Stop", self.debug_stop)
+        self.stop_action.setShortcut("Shift+F5")
+        self.stop_action.setToolTip("Stop debugging (Shift+F5)")
+        self.stop_action.setEnabled(False)
         
-    def append_output(self, text):
-        self.debug_output.append(text)
+        toolbar.addSeparator()
         
-        # Ensure the latest output is visible
-        scrollbar = self.debug_output.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # Stepping controls
+        self.step_into_action = toolbar.addAction("⬇️ Step Into", self.debug_step_into)
+        self.step_into_action.setShortcut("F11")
+        self.step_into_action.setToolTip("Step into function (F11)")
+        self.step_into_action.setEnabled(False)
         
-    def history_prev(self):
-        """Navigate to previous command in history with readline-like behavior"""
-        if not self.command_history:
-            return
-            
-        # Save current text if at end of history
-        if self.history_position == len(self.command_history):
-            self.current_input = self.cmd_entry.text()
-            
-        if self.history_position > 0:
-            self.history_position -= 1
-            self.cmd_entry.setText(self.command_history[self.history_position])
-            # Position cursor at the end of text
-            self.cmd_entry.setCursorPosition(len(self.cmd_entry.text()))
+        self.step_over_action = toolbar.addAction("➡️ Step Over", self.debug_step_over)
+        self.step_over_action.setShortcut("F10")
+        self.step_over_action.setToolTip("Step over line (F10)")
+        self.step_over_action.setEnabled(False)
         
-    def history_next(self):
-        """Navigate to next command in history with readline-like behavior"""
-        if not self.command_history:
-            return
-            
-        if self.history_position < len(self.command_history) - 1:
-            self.history_position += 1
-            self.cmd_entry.setText(self.command_history[self.history_position])
-            self.cmd_entry.setCursorPosition(len(self.cmd_entry.text()))
-        elif self.history_position == len(self.command_history) - 1:
-            # At the end of history, restore the current input
-            self.history_position = len(self.command_history)
-            if hasattr(self, 'current_input'):
-                self.cmd_entry.setText(self.current_input)
-            else:
-                self.cmd_entry.clear()
+        self.step_out_action = toolbar.addAction("⬆️ Step Out", self.debug_step_out)
+        self.step_out_action.setShortcut("Shift+F11")
+        self.step_out_action.setToolTip("Step out of function (Shift+F11)")
+        self.step_out_action.setEnabled(False)
+        
+        self.continue_action = toolbar.addAction("⏩ Continue", self.debug_continue)
+        self.continue_action.setShortcut("F9")
+        self.continue_action.setToolTip("Continue execution (F9)")
+        self.continue_action.setEnabled(False)
+        
+        toolbar.addSeparator()
+        
+        # Breakpoint controls
+        self.toggle_bp_action = toolbar.addAction("🔴 Toggle BP", self.toggle_breakpoint_at_cursor)
+        self.toggle_bp_action.setShortcut("Ctrl+F9")
+        self.toggle_bp_action.setToolTip("Toggle breakpoint at current line (Ctrl+F9)")
+        
+        self.clear_all_bp_action = toolbar.addAction("🗑️ Clear All BP", self.clear_all_breakpoints)
+        self.clear_all_bp_action.setShortcut("Ctrl+Shift+F9")
+        self.clear_all_bp_action.setToolTip("Clear all breakpoints (Ctrl+Shift+F9)")
+        
+        toolbar.addSeparator()
+        
+        # Advanced features
+        self.profile_action = toolbar.addAction("📊 Profile", self.toggle_profiling)
+        self.profile_action.setToolTip("Toggle performance profiling")
+        self.profile_action.setCheckable(True)
+        
+        parent_layout.addWidget(toolbar)
+        
+    def create_code_panel(self):
+        """Create the code viewing panel with line numbers and breakpoint support"""
+        panel = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # File info header
+        file_info = QtWidgets.QLabel("No file loaded")
+        file_info.setStyleSheet("background-color: #e9ecef; padding: 5px; border-bottom: 1px solid #dee2e6;")
+        layout.addWidget(file_info)
+        self.file_info_label = file_info
+        
+        # Code view container with line numbers
+        code_container = QtWidgets.QWidget()
+        code_layout = QtWidgets.QHBoxLayout(code_container)
+        code_layout.setContentsMargins(0, 0, 0, 0)
+        code_layout.setSpacing(0)
+        
+        # Line number area with breakpoint support
+        self.line_number_area = DebugLineNumberArea()
+        self.line_number_area.setFixedWidth(60)
+        self.line_number_area.breakpoint_toggled.connect(self.toggle_breakpoint)
+        code_layout.addWidget(self.line_number_area)
+        
+        # Code editor with syntax highlighting
+        self.code_view = QtWidgets.QPlainTextEdit()
+        self.code_view.setFont(QtGui.QFont("Consolas", 10))
+        self.code_view.setReadOnly(True)
+        self.code_view.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        self.code_view.cursorPositionChanged.connect(self.on_cursor_position_changed)
+        
+        # Apply syntax highlighting
+        self.highlighter = PythonSyntaxHighlighter(self.code_view.document())
+        
+        # Connect line number area to code view
+        self.line_number_area.set_code_view(self.code_view)
+        
+        code_layout.addWidget(self.code_view)
+        layout.addWidget(code_container)
+        
+        # Expression evaluator
+        eval_frame = QtWidgets.QFrame()
+        eval_frame.setFrameStyle(QtWidgets.QFrame.Shape.StyledPanel)
+        eval_layout = QtWidgets.QHBoxLayout(eval_frame)
+        
+        eval_layout.addWidget(QtWidgets.QLabel("Evaluate:"))
+        
+        self.eval_entry = QtWidgets.QLineEdit()
+        self.eval_entry.setPlaceholderText("Enter Python expression (e.g., variable_name, len(my_list))")
+        self.eval_entry.returnPressed.connect(self.evaluate_expression)
+        eval_layout.addWidget(self.eval_entry)
+        
+        eval_btn = QtWidgets.QPushButton("Evaluate")
+        eval_btn.clicked.connect(self.evaluate_expression)
+        eval_layout.addWidget(eval_btn)
+        
+        self.eval_result = QtWidgets.QLabel("Result will appear here")
+        self.eval_result.setStyleSheet("color: #6c757d; font-style: italic;")
+        eval_layout.addWidget(self.eval_result)
+        
+        layout.addWidget(eval_frame)
+        
+        return panel
+        
+    def create_info_panel(self):
+        """Create the debug information panel with tabs"""
+        tabs = QtWidgets.QTabWidget()
+        tabs.setTabPosition(QtWidgets.QTabWidget.TabPosition.North)
+        
+        # Variables tab
+        self.variables_widget = self.create_variables_tab()
+        tabs.addTab(self.variables_widget, "Variables")
+        
+        # Call stack tab  
+        self.call_stack_widget = self.create_call_stack_tab()
+        tabs.addTab(self.call_stack_widget, "Call Stack")
+        
+        # Breakpoints tab
+        self.breakpoints_widget = self.create_breakpoints_tab()
+        tabs.addTab(self.breakpoints_widget, "Breakpoints")
+        
+        # Watch expressions tab
+        self.watch_widget = self.create_watch_tab()
+        tabs.addTab(self.watch_widget, "Watch")
+        
+        # Output/Console tab
+        self.output_widget = self.create_output_tab()
+        tabs.addTab(self.output_widget, "Output")
+        
+        # Performance tab
+        self.profiler_widget = self.create_profiler_tab()
+        tabs.addTab(self.profiler_widget, "Performance")
+        
+        return tabs
+        
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts for debugging actions"""
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+F5"), self, self.restart_debugging)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F9"), self, self.toggle_breakpoint_at_cursor)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+F9"), self, self.clear_all_breakpoints)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+E"), self, lambda: self.eval_entry.setFocus())
+        
+    # Tab creation methods
+    def create_variables_tab(self):
+        """Create the variables inspection tab"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Variables tree
+        self.variables_tree = QtWidgets.QTreeWidget()
+        self.variables_tree.setHeaderLabels(["Name", "Value", "Type"])
+        self.variables_tree.setAlternatingRowColors(True)
+        layout.addWidget(self.variables_tree)
+        
+        return widget
+        
+    def create_call_stack_tab(self):
+        """Create the call stack tab"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Call stack list
+        self.call_stack_list = QtWidgets.QListWidget()
+        self.call_stack_list.itemClicked.connect(self.on_stack_frame_selected)
+        layout.addWidget(self.call_stack_list)
+        
+        return widget
+        
+    def create_breakpoints_tab(self):
+        """Create the breakpoints management tab"""
+        self.breakpoints_widget = BreakpointsWidget()
+        self.breakpoints_widget.breakpoint_changed.connect(self.on_breakpoint_changed)
+        return self.breakpoints_widget
+        
+    def create_watch_tab(self):
+        """Create the watch expressions tab"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Add watch input
+        watch_input = QtWidgets.QHBoxLayout()
+        self.watch_entry = QtWidgets.QLineEdit()
+        self.watch_entry.setPlaceholderText("Enter expression to watch")
+        self.watch_entry.returnPressed.connect(self.add_watch_expression)
+        watch_input.addWidget(self.watch_entry)
+        
+        add_watch_btn = QtWidgets.QPushButton("Add")
+        add_watch_btn.clicked.connect(self.add_watch_expression)
+        watch_input.addWidget(add_watch_btn)
+        layout.addLayout(watch_input)
+        
+        # Watch list
+        self.watch_list = QtWidgets.QTreeWidget()
+        self.watch_list.setHeaderLabels(["Expression", "Value", "Type"])
+        layout.addWidget(self.watch_list)
+        
+        return widget
+        
+    def create_output_tab(self):
+        """Create the debug output tab"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Output text area
+        self.output_text = QtWidgets.QTextEdit()
+        self.output_text.setReadOnly(True)
+        self.output_text.setFont(QtGui.QFont("Consolas", 9))
+        layout.addWidget(self.output_text)
+        
+        # Clear button
+        clear_btn = QtWidgets.QPushButton("Clear Output")
+        clear_btn.clicked.connect(self.clear_output)
+        layout.addWidget(clear_btn)
+        
+        return widget
+        
+    def create_profiler_tab(self):
+        """Create the performance profiler tab"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        
+        # Profiler controls
+        controls = QtWidgets.QHBoxLayout()
+        self.profile_btn = QtWidgets.QPushButton("Start Profiling")
+        self.profile_btn.clicked.connect(self.toggle_profiling)
+        controls.addWidget(self.profile_btn)
+        controls.addStretch()
+        layout.addLayout(controls)
+        
+        # Profiler results
+        self.profiler_table = QtWidgets.QTableWidget()
+        self.profiler_table.setColumnCount(4)
+        self.profiler_table.setHorizontalHeaderLabels(["Function", "Calls", "Time", "Per Call"])
+        layout.addWidget(self.profiler_table)
+        
+        return widget
+        
+    # Core debugging methods
+    def set_current_editor(self, editor):
+        """Set the current editor for debugging"""
+        self.current_editor = editor
+        
+    def load_file(self, file_path, content):
+        """Load a file for debugging"""
+        self.current_file = file_path
+        self.code_view.setPlainText(content)
+        self.file_info_label.setText(f"File: {os.path.basename(file_path)}")
+        self.breakpoints.clear()
+        self.line_number_area.update_breakpoints(self.breakpoints)
+        self.status_bar.showMessage(f"Loaded file: {os.path.basename(file_path)}")
         
     def debug_run(self):
-        if self.debugger_active:
-            self.append_output("<span style='color:orange;'>Debug session already running</span>")
+        """Start debugging the current file"""
+        # Try to get file from current editor if not already set
+        if not self.current_file and self.current_editor:
+            file_path = self.current_editor.property("file_path")
+            if file_path:
+                self.current_file = file_path
+                content = self.current_editor.toPlainText()
+                self.load_file(file_path, content)
+        
+        if not self.current_file:
+            QtWidgets.QMessageBox.warning(self, "No File", "No file loaded for debugging")
             return
             
-        self.status_bar.showMessage("Starting debugger...")
-        self.append_output("<b>Starting debug session</b>")
+        try:
+            self.update_ui_state()
+            self.add_output("Starting debug session...")
+            
+            # Get code content
+            code = self.code_view.toPlainText()
+            if not code.strip():
+                QtWidgets.QMessageBox.warning(self, "No Code", "No code to debug")
+                return
+            
+            # Start debug session with pdb
+            self.debug_server.start_debug_session(self.current_file, code)
+            
+        except Exception as e:
+            self.add_output(f"Error starting debug: {str(e)}", "error")
+            self.debugger_active = False
+            self.update_ui_state()
+            
+    def debug_pause(self):
+        """Pause the debugging execution"""
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            self.debug_process.kill()
+            self.add_output("Execution paused")
+            
+    def debug_stop(self):
+        """Stop the debugging session"""
+        if self.debug_server:
+            self.debug_server.stop_debug_session()
+            
+        self.debugger_active = False
+        self.current_line = None
+        self.clear_current_line_highlight()
+        self.update_ui_state()
+        self.add_output("Debug session stopped")
         
-        current_editor = self.current_editor if hasattr(self, 'current_editor') else None
-        if current_editor:
-            self.code_to_debug = current_editor.toPlainText()
-            self.current_file = current_editor.property("file_path") or "untitled"
+    def debug_step_into(self):
+        """Step into the next function call"""
+        if self.debug_server:
+            self.debug_server.step_into()
             
-            self.code_view.setPlainText(self.code_to_debug)
+    def debug_step_over(self):
+        """Step over the current line"""
+        if self.debug_server:
+            self.debug_server.step_over()
             
+    def debug_step_out(self):
+        """Step out of the current function"""
+        if self.debug_server:
+            self.debug_server.step_out()
+            
+    def debug_continue(self):
+        """Continue execution until next breakpoint"""
+        if self.debug_server:
+            self.debug_server.continue_execution()
+            
+    def start_pdb_process(self):
+        """Start the pdb debugging process"""
+        if not self.current_file:
+            return
+            
+        self.debug_process = QtCore.QProcess(self)
+        self.debug_process.readyReadStandardOutput.connect(self.read_debug_output)
+        self.debug_process.readyReadStandardError.connect(self.read_debug_error)
+        self.debug_process.finished.connect(self.debug_finished)
+        self.debug_process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+        
+        # Set breakpoints in PDB format if any exist
+        breakpoint_commands = []
+        for line_num in self.breakpoints.keys():
+            breakpoint_commands.append(f"b {line_num}")
+        
+        # Start Python with pdb
+        self.debug_process.start("python3", ["-m", "pdb", self.current_file])
+        
+        # Set up initial debugging environment after process starts
+        QtCore.QTimer.singleShot(1000, self.setup_debug_environment)
+    
+    def setup_debug_environment(self):
+        """Set up the debugging environment with breakpoints and initial commands"""
+        if not self.debugger_active:
+            return
+            
+        # Set any existing breakpoints
+        for line_num in self.breakpoints.keys():
+            self.send_debug_command(f"b {line_num}")
+            QtCore.QTimer.singleShot(100, lambda: None)  # Small delay between commands
+        
+        # List current line and get initial state
+        QtCore.QTimer.singleShot(200, lambda: self.send_debug_command("l"))
+        QtCore.QTimer.singleShot(300, lambda: self.send_debug_command("pp locals()"))
+        
+    def send_debug_command(self, command):
+        """Send a command to the pdb process"""
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            self.debug_process.write(f"{command}\n".encode())
+            
+    def read_debug_output(self):
+        """Read output from the debug process"""
+        data = self.debug_process.readAllStandardOutput().data().decode()
+        self.add_output(data)
+        
+        # Parse PDB output for debugging information
+        self.parse_pdb_output(data)
+    
+    def parse_pdb_output(self, output):
+        """Parse PDB output to extract debugging information"""
+        lines = output.strip().split('\n')
+        
+        for line in lines:
+            # Check for current line indicator
+            if line.startswith('-> '):
+                # Extract line number from PDB output
+                try:
+                    # Format: -> 123     some_code_here
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        line_num = int(parts[1])
+                        self.highlight_current_line(line_num)
+                        # Request variable information
+                        QtCore.QTimer.singleShot(100, lambda: self.send_debug_command("pp locals()"))
+                        QtCore.QTimer.singleShot(200, lambda: self.send_debug_command("w"))  # where (call stack)
+                except (ValueError, IndexError):
+                    pass
+            
+            # Check for breakpoint hit
+            elif "Breakpoint" in line and "at" in line:
+                self.add_output("Breakpoint hit!", "warning")
+                # Request current state information
+                QtCore.QTimer.singleShot(100, lambda: self.send_debug_command("l"))
+                QtCore.QTimer.singleShot(200, lambda: self.send_debug_command("pp locals()"))
+        
+    def read_debug_error(self):
+        """Read error output from the debug process"""
+        data = self.debug_process.readAllStandardError().data().decode()
+        self.add_output(data, "error")
+        
+    def debug_finished(self):
+        """Handle debug process completion"""
+        self.debugger_active = False
+        self.update_ui_state()
+        self.add_output("Debug session completed")
+        
+    # UI helper methods
+    def toggle_breakpoint(self, line_number):
+        """Toggle breakpoint at the specified line"""
+        if not self.current_file:
+            return
+            
+        if line_number in self.breakpoints:
+            del self.breakpoints[line_number]
+            self.remove_breakpoint_from_list(line_number)
+            # Remove breakpoint from pdb
+            if self.debug_server:
+                self.debug_server.remove_breakpoint(self.current_file, line_number)
+        else:
+            self.breakpoints[line_number] = True
+            self.add_breakpoint_to_list(line_number)
+            # Add breakpoint to pdb
+            if self.debug_server:
+                self.debug_server.set_breakpoint(self.current_file, line_number)
+            
+        self.line_number_area.update_breakpoints(self.breakpoints)
+        
+    def toggle_breakpoint_at_cursor(self):
+        """Toggle breakpoint at current cursor position"""
+        cursor = self.code_view.textCursor()
+        line_number = cursor.blockNumber() + 1
+        self.toggle_breakpoint(line_number)
+        
+    def clear_all_breakpoints(self):
+        """Clear all breakpoints"""
+        self.breakpoints.clear()
+        if hasattr(self, 'breakpoints_widget'):
+            self.breakpoints_widget.clear_all_breakpoints()
+        self.line_number_area.update_breakpoints(self.breakpoints)
+        
+    def add_breakpoint_to_list(self, line_number):
+        """Add breakpoint to the breakpoints list"""
+        if hasattr(self, 'breakpoints_widget') and self.current_file:
+            self.breakpoints_widget.add_breakpoint(self.current_file, line_number)
+        
+    def remove_breakpoint_from_list(self, line_number):
+        """Remove breakpoint from the breakpoints list"""
+        if hasattr(self, 'breakpoints_widget') and self.current_file:
+            self.breakpoints_widget.remove_breakpoint(self.current_file, line_number)
+    
+    def on_breakpoint_changed(self, file_path, line_number, is_set):
+        """Handle breakpoint changes from the breakpoints widget"""
+        if is_set:
+            self.breakpoints[line_number] = True
+        elif line_number in self.breakpoints:
+            del self.breakpoints[line_number]
+        self.line_number_area.update_breakpoints(self.breakpoints)
+                
+    def evaluate_expression(self):
+        """Evaluate the expression in the eval entry"""
+        expression = self.eval_entry.text().strip()
+        if not expression:
+            return
+            
+        try:
+            if self.debugger_active and self.debug_server:
+                # Use pdb's eval command for debugging context
+                self.debug_server.evaluate(expression)
+                self.eval_result.setText("Evaluating in debugger context...")
+                self.eval_result.setStyleSheet("color: #6c757d; font-style: italic;")
+            else:
+                # Fallback to local evaluation
+                if self.locals_data:
+                    result = eval(expression, self.globals_data, self.locals_data)
+                else:
+                    result = eval(expression)
+                    
+                self.eval_result.setText(f"Result: {result}")
+                self.eval_result.setStyleSheet("color: #28a745;")
+            
+            self.eval_entry.clear()
+            
+        except Exception as e:
+            self.eval_result.setText(f"Error: {str(e)}")
+            self.eval_result.setStyleSheet("color: #dc3545;")
+            
+    def add_watch_expression(self):
+        """Add a new watch expression"""
+        expression = self.watch_entry.text().strip()
+        if not expression:
+            return
+            
+        self.watch_expressions.append(expression)
+        self.update_watch_expressions()
+        self.watch_entry.clear()
+        
+    def update_watch_expressions(self):
+        """Update all watch expressions"""
+        self.watch_list.clear()
+        for expr in self.watch_expressions:
             try:
-                # Create a temporary file if needed
-                if self.current_file == "untitled":
-                    temp = tempfile.NamedTemporaryFile(suffix='.py', delete=False)
-                    temp.write(self.code_to_debug.encode())
-                    temp.close()
-                    self.current_file = temp.name
+                if self.locals_data:
+                    result = eval(expr, self.globals_data, self.locals_data)
                 else:
-                    # Save current content to file to ensure it's up to date
-                    with open(self.current_file, 'w') as f:
-                        f.write(self.code_to_debug)
-                
-                # Initialize command history
-                self.command_history = []
-                self.history_position = 0
-                self.current_input = ""
-                
-                # Create a QProcess to run the debugger
-                self.debug_process = QtCore.QProcess()
-                self.debug_process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
-                self.debug_process.readyReadStandardOutput.connect(self.handle_debug_output)
-                self.debug_process.finished.connect(self.handle_debug_finished)
-                
-                # Start the debugger with the current file directly
-                python_executable = sys.executable
-                self.debug_process.start(python_executable, ['-u', '-m', 'pdb', self.current_file])
-                
-                if self.debug_process.waitForStarted(1000):
-                    self.debugger_active = True
-                    self.update_ui_state(True)
-                    self.cmd_entry.setFocus()
-                else:
-                    self.append_output("<span style='color:red;'>Failed to start debugger process</span>")
-                    self.debugger_active = False
-            
+                    result = "Not available"
+                    
+                item = QtWidgets.QTreeWidgetItem([
+                    expr, str(result), type(result).__name__
+                ])
+                self.watch_list.addTopLevelItem(item)
             except Exception as e:
-                self.append_output(f"<span style='color:red;'>Error starting debugger: {str(e)}</span>")
-                self.append_output(f"<pre style='color:red;'>{traceback.format_exc()}</pre>")
-                self.debugger_active = False
-                self.status_bar.showMessage("Error starting debugger")
-                self.update_ui_state(False)
-        else:
-            self.append_output("<span style='color:red;'>No editor found to debug</span>")
-            self.status_bar.showMessage("No editor found")
-            
-    def update_ui_state(self, debugging_active):
-        """Update UI elements based on debugging state"""
-        self.run_button.setEnabled(not debugging_active)
-        self.pause_button.setEnabled(debugging_active)
-        self.stop_button.setEnabled(debugging_active)
-        self.step_into_button.setEnabled(debugging_active)
-        self.step_over_button.setEnabled(debugging_active)
-        self.step_out_button.setEnabled(debugging_active)
-        self.continue_button.setEnabled(debugging_active)
-        self.cmd_entry.setEnabled(debugging_active)
+                item = QtWidgets.QTreeWidgetItem([
+                    expr, f"Error: {str(e)}", "Error"
+                ])
+                self.watch_list.addTopLevelItem(item)
+                
+    def update_variables(self, locals_dict, globals_dict=None):
+        """Update the variables display"""
+        self.locals_data = locals_dict
+        self.globals_data = globals_dict or {}
         
-        if debugging_active:
-            self.status_bar.showMessage("Debugging active")
-        else:
-            self.status_bar.showMessage("Debugging stopped")
+        self.variables_tree.clear()
+        
+        # Add locals
+        if locals_dict:
+            locals_item = QtWidgets.QTreeWidgetItem(["Locals", "", ""])
+            for name, value in locals_dict.items():
+                item = QtWidgets.QTreeWidgetItem([
+                    name, str(value), type(value).__name__
+                ])
+                locals_item.addChild(item)
+            self.variables_tree.addTopLevelItem(locals_item)
+            locals_item.setExpanded(True)
             
-    def handle_debug_output(self):
-        """Process output from the debug process"""
+        self.update_watch_expressions()
+        
+    def update_call_stack(self, call_stack):
+        """Update the call stack display"""
+        self.call_stack = call_stack
+        self.call_stack_list.clear()
+        
+        for frame in call_stack:
+            frame_text = f"{frame.get('function', 'unknown')} - {frame.get('filename', 'unknown')}:{frame.get('lineno', 0)}"
+            self.call_stack_list.addItem(frame_text)
+            
+    def on_stack_frame_selected(self, item):
+        """Handle call stack frame selection"""
+        # Implementation for navigating to selected frame
+        pass
+        
+    def on_cursor_position_changed(self):
+        """Handle cursor position changes in code view"""
+        cursor = self.code_view.textCursor()
+        line = cursor.blockNumber() + 1
+        column = cursor.columnNumber() + 1
+        self.status_bar.showMessage(f"Line: {line}, Column: {column}")
+        
+    def highlight_current_line(self, line_number):
+        """Highlight the current execution line"""
+        if not line_number:
+            return
+            
+        # Scroll to and highlight the line
+        cursor = self.code_view.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.Down, 
+                          QtGui.QTextCursor.MoveMode.MoveAnchor, line_number - 1)
+        self.code_view.setTextCursor(cursor)
+        self.code_view.centerCursor()
+        
+    def clear_current_line_highlight(self):
+        """Clear current line highlighting"""
+        self.code_view.setExtraSelections([])
+    
+    def update_variables_display(self, variables):
+        """Update the variables tree with new data"""
+        self.variables_tree.clear()
+        
+        # Group variables by scope
+        local_vars = {k: v for k, v in variables.items() if v.get('scope') == 'local'}
+        global_vars = {k: v for k, v in variables.items() if v.get('scope') == 'global'}
+        
+        # Add local variables
+        if local_vars:
+            local_root = QtWidgets.QTreeWidgetItem(self.variables_tree, ["Local Variables", "", ""])
+            local_root.setExpanded(True)
+            for name, var_info in local_vars.items():
+                item = QtWidgets.QTreeWidgetItem(local_root, [
+                    name, 
+                    var_info.get('value', ''), 
+                    var_info.get('type', '')
+                ])
+        
+        # Add global variables
+        if global_vars:
+            global_root = QtWidgets.QTreeWidgetItem(self.variables_tree, ["Global Variables", "", ""])
+            for name, var_info in global_vars.items():
+                item = QtWidgets.QTreeWidgetItem(global_root, [
+                    name, 
+                    var_info.get('value', ''), 
+                    var_info.get('type', '')
+                ])
+    
+    def update_call_stack_display(self, call_stack):
+        """Update the call stack list with new data"""
+        self.call_stack_list.clear()
+        
+        for frame_info in call_stack:
+            level = frame_info.get('level', 0)
+            function = frame_info.get('function', '<unknown>')
+            filename = frame_info.get('filename', '<unknown>')
+            line = frame_info.get('line', 0)
+            
+            item_text = f"[{level}] {function} in {os.path.basename(filename)}:{line}"
+            self.call_stack_list.addItem(item_text)
+        
+    def update_ui_state(self):
+        """Update UI based on debugger state"""
+        is_running = self.debugger_active
+        
+        # Update toolbar buttons
+        self.run_action.setEnabled(not is_running)
+        self.pause_action.setEnabled(is_running)
+        self.stop_action.setEnabled(is_running)
+        self.step_into_action.setEnabled(is_running)
+        self.step_over_action.setEnabled(is_running)
+        self.step_out_action.setEnabled(is_running)
+        self.continue_action.setEnabled(is_running)
+        
+        # Update status
+        if is_running:
+            self.status_bar.showMessage("Debugging - Execution paused")
+        else:
+            self.status_bar.showMessage("Ready")
+            
+    def toggle_profiling(self):
+        """Toggle performance profiling"""
+        self.profiler_enabled = not self.profiler_enabled
+        if self.profiler_enabled:
+            self.profile_btn.setText("Stop Profiling")
+            self.add_output("Performance profiling enabled")
+        else:
+            self.profile_btn.setText("Start Profiling")
+            self.add_output("Performance profiling disabled")
+            
+    def on_debug_state_changed(self, state, data):
+        """Handle debug state changes from DebugThread"""
+        if state == 'paused':
+            self.debugger_active = True
+            self.current_line = data.get('line')
+            self.update_variables_display(data.get('variables', {}))
+            self.update_call_stack_display(data.get('call_stack', []))
+            self.highlight_current_line(data.get('line'))
+            self.status_bar.showMessage(f"Paused at line {data.get('line')}")
+        elif state == 'finished':
+            self.debugger_active = False
+            self.clear_current_line_highlight()
+            self.status_bar.showMessage("Debug session finished")
+        elif state == 'exception':
+            self.add_output(f"Exception: {data.get('message', 'Unknown error')}", "error")
+            
+        self.update_ui_state()
+    
+    def on_debug_output(self, output_type, content):
+        """Handle debug output"""
+        self.add_output(content, output_type)
+    
+    def on_debug_error(self, error_message):
+        """Handle debug errors"""
+        self.add_output(f"Debug Error: {error_message}", "error")
+        self.debugger_active = False
+        self.update_ui_state()
+
+    def restart_debugging(self):
+        """Restart the debugging session"""
+        if self.debugger_active:
+            self.debug_stop()
+        self.debug_run()
+        
+    def add_output(self, text, msg_type="info"):
+        """Add text to the output panel"""
+        if not text.strip():
+            return
+            
+        if msg_type == "error":
+            color = "#dc3545"
+        elif msg_type == "warning":
+            color = "#ffc107"
+        else:
+            color = "#212529"
+        
+        # Clean up PDB output formatting
+        lines = text.strip().split('\n')
+        formatted_lines = []
+        
+        for line in lines:
+            # Skip empty lines and PDB prompts
+            if line.strip() in ['', '(Pdb)', '(Pdb) ']:
+                continue
+            formatted_lines.append(line)
+        
+        if formatted_lines:
+            clean_text = '\n'.join(formatted_lines)
+            formatted_text = f'<span style="color: {color};">{clean_text}</span><br>'
+            self.output_text.insertHtml(formatted_text)
+            self.output_text.moveCursor(QtGui.QTextCursor.MoveOperation.End)
+        
+    def clear_output(self):
+        """Clear the output panel"""
+        self.output_text.clear()
+        
+    def closeEvent(self, event):
+        """Ensure proper cleanup when debugger dialog is closed"""
+        if self.debugger_active:
+            self.debug_stop()
+        event.accept()
+
+# Advanced debugging components
+
+class PdbDebugServer(QtCore.QObject):
+    state_changed = QtCore.pyqtSignal(str, dict)
+    output_received = QtCore.pyqtSignal(str, str)
+    error_occurred = QtCore.pyqtSignal(str)
+    
+    def __init__(self):
+        super().__init__()
+        self.debug_process = None
+        self.profiling_enabled = False
+        self.current_file = None
+        self.breakpoints = {}
+        self.current_line = None
+        self.variables = {}
+        
+    def start_debug_session(self, file_path, code):
+        try:
+            self.current_file = file_path
+            
+            # Validate inputs
+            if not file_path or not code:
+                self.error_occurred.emit("Invalid file path or empty code")
+                return
+            
+            # Save code to file if needed
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(code)
+            except Exception as e:
+                self.error_occurred.emit(f"Failed to save file: {str(e)}")
+                return
+            
+            # Clean up any existing process
+            if self.debug_process:
+                self.debug_process.kill()
+                self.debug_process = None
+            
+            # Start pdb process
+            try:
+                self.debug_process = QtCore.QProcess(self)
+                if not self.debug_process:
+                    self.error_occurred.emit("Failed to create QProcess")
+                    return
+                
+                self.debug_process.readyReadStandardOutput.connect(self.read_pdb_output)
+                self.debug_process.readyReadStandardError.connect(self.read_pdb_error)
+                self.debug_process.finished.connect(self.debug_finished)
+                self.debug_process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+                
+            except Exception as e:
+                self.error_occurred.emit(f"Failed to set up process: {str(e)}")
+                return
+            
+            # Start Python with pdb
+            try:
+                self.debug_process.start("python3", ["-m", "pdb", file_path])
+                
+                if self.debug_process.waitForStarted(3000):
+                    self.state_changed.emit('started', {})
+                    # Set up initial breakpoints after a short delay
+                    QtCore.QTimer.singleShot(500, self.setup_initial_breakpoints)
+                else:
+                    error_msg = f"Failed to start pdb process. Error: {self.debug_process.errorString()}"
+                    self.error_occurred.emit(error_msg)
+                    
+            except Exception as e:
+                self.error_occurred.emit(f"Failed to start pdb: {str(e)}")
+                
+        except Exception as e:
+            self.error_occurred.emit(f"Failed to start debug session: {str(e)}")
+    
+    def setup_initial_breakpoints(self):
+        """Set up breakpoints after pdb starts"""
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            # Set any existing breakpoints
+            for bp_key, bp_info in self.breakpoints.items():
+                line_num = bp_key.split(':')[-1]
+                self.send_command(f"b {line_num}")
+            
+            # Start execution
+            self.send_command("c")
+    
+    def read_pdb_output(self):
+        """Read and parse pdb output"""
         if not self.debug_process:
             return
             
-        data = self.debug_process.readAllStandardOutput().data().decode()
+        data = self.debug_process.readAllStandardOutput().data().decode('utf-8')
+        self.output_received.emit('stdout', data)
         
-        # Handle special markers for variables and stack updates
-        if "VARIABLES_START" in data:
-            # Extract variables JSON
-            start = data.find("VARIABLES_START") + len("VARIABLES_START")
-            end = data.find("VARIABLES_END")
-            if start > 0 and end > start:
-                json_data = data[start:end].strip()
-                try:
-                    vars_dict = json.loads(json_data)
-                    self.update_variable_inspector(vars_dict)
-                except json.JSONDecodeError:
-                    self.append_output(f"<span style='color:red;'>Error parsing variables JSON</span>")
-                
-                # Remove the variables block from output
-                data = data[:start-len("VARIABLES_START")] + data[end+len("VARIABLES_END"):]
-        
-        if "STACK_START" in data:
-            # Extract stack JSON
-            start = data.find("STACK_START") + len("STACK_START")
-            end = data.find("STACK_END")
-            if start > 0 and end > start:
-                json_data = data[start:end].strip()
-                try:
-                    stack_frames = json.loads(json_data)
-                    self.update_call_stack(stack_frames)
-                except json.JSONDecodeError:
-                    self.append_output(f"<span style='color:red;'>Error parsing stack JSON</span>")
-                
-                # Remove the stack block from output
-                data = data[:start-len("STACK_START")] + data[end+len("STACK_END"):]
-        
-        # Handle line update markers
-        line_update = re.search(r"LINE_UPDATE (\d+)", data)
-        if line_update:
-            line_number = int(line_update.group(1))
-            self.highlight_current_line(line_number)
-            # Remove the line update marker from output
-            data = data.replace(line_update.group(0), "")
-        
-        # Add the remaining output
-        if data.strip():
-            self.append_output(data.strip())
+        # Parse pdb output for current line and state
+        self.parse_pdb_output(data)
     
-    def handle_debug_finished(self, exit_code, exit_status):
-        """Handle debug process termination"""
-        self.debugger_active = False
-        self.update_ui_state(False)
-        self.append_output(f"<b>Debug process finished (exit code: {exit_code})</b>")
-        self.debug_process = None
+    def read_pdb_error(self):
+        """Read pdb error output"""
+        if not self.debug_process:
+            return
             
-    def debug_step_into(self):
-        if self.debugger_active and self.debug_process:
-            self.execute_command("step")
-        
-    def debug_step_over(self):
-        if self.debugger_active and self.debug_process:
-            self.execute_command("next")
-        
-    def debug_step_out(self):
-        if self.debugger_active and self.debug_process:
-            self.execute_command("return")
-        
-    def debug_continue(self):
-        if self.debugger_active and self.debug_process:
-            self.execute_command("continue")
+        data = self.debug_process.readAllStandardError().data().decode('utf-8')
+        self.output_received.emit('stderr', data)
     
-    def debug_pause(self):
+    def parse_pdb_output(self, output):
+        """Parse pdb output to extract debugging information"""
+        lines = output.strip().split('\n')
+        
+        for line in lines:
+            # Check for current line indicator (e.g., "-> 5    print('hello')")
+            if line.strip().startswith('->'):
+                try:
+                    # Extract line number
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        line_num = int(parts[1])
+                        self.current_line = line_num
+                        
+                        # Get variables
+                        self.request_variables()
+                        
+                        # Emit state change
+                        debug_info = {
+                            'line': line_num,
+                            'variables': self.variables,
+                            'call_stack': []
+                        }
+                        self.state_changed.emit('paused', debug_info)
+                except (ValueError, IndexError):
+                    pass
+            
+            # Check for program termination
+            elif "The program finished" in line or "--Return--" in line:
+                self.state_changed.emit('finished', {})
+    
+    def send_command(self, command):
+        """Send command to pdb process"""
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            self.debug_process.write(f"{command}\n".encode('utf-8'))
+    
+    def request_variables(self):
+        """Request current variables from pdb"""
+        # Request local variables
+        self.send_command("pp locals()")
+        # Small delay then request globals
+        QtCore.QTimer.singleShot(100, lambda: self.send_command("pp globals()"))
+    
+    def debug_finished(self):
+        """Handle debug process completion"""
+        self.state_changed.emit('finished', {})
+        self.debug_process = None
+    
+    def stop_debug_session(self):
+        """Stop the debug session"""
+        if self.debug_process:
+            self.send_command("q")
+            if not self.debug_process.waitForFinished(2000):
+                self.debug_process.kill()
+            self.debug_process = None
+    
+    def step_into(self):
+        """Step into next line"""
+        self.send_command("s")
+    
+    def step_over(self):
+        """Step over current line"""
+        self.send_command("n")
+    
+    def step_out(self):
+        """Step out of current function"""
+        self.send_command("r")
+    
+    def continue_execution(self):
+        """Continue execution"""
+        self.send_command("c")
+    
+    def set_breakpoint(self, file_path, line_number, condition=None):
+        """Set a breakpoint"""
+        bp_key = f"{file_path}:{line_number}"
+        self.breakpoints[bp_key] = {'condition': condition}
+        
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            if condition:
+                self.send_command(f"b {line_number}, {condition}")
+            else:
+                self.send_command(f"b {line_number}")
+    
+    def remove_breakpoint(self, file_path, line_number):
+        """Remove a breakpoint"""
+        bp_key = f"{file_path}:{line_number}"
+        if bp_key in self.breakpoints:
+            del self.breakpoints[bp_key]
+            
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            self.send_command(f"cl {line_number}")
+    
+    def clear_all_breakpoints(self):
+        """Clear all breakpoints"""
+        self.breakpoints.clear()
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            self.send_command("cl")
+    
+    def evaluate(self, expression):
+        """Evaluate an expression"""
+        if self.debug_process and self.debug_process.state() == QtCore.QProcess.ProcessState.Running:
+            self.send_command(f"p {expression}")
+
+# End of PdbDebugServer class
+
+# Enhanced UI Components
+
+class AdvancedVariablesWidget(QtWidgets.QTreeWidget):
+    def __init__(self):
+        super().__init__()
+        self.setHeaderLabels(["Name", "Value", "Type", "Scope"])
+        self.setColumnWidth(0, 150)
+        self.setColumnWidth(1, 200)
+        self.setColumnWidth(2, 100)
+        
+    def update_variables(self, variables):
+        """Update the variables tree with new data"""
+        self.clear()
+        
+        if not variables:
+            return
+            
+        # Group by scope
+        local_vars = []
+        global_vars = []
+        
+        for name, var_info in variables.items():
+            item = QtWidgets.QTreeWidgetItem([
+                name,
+                var_info.get('value', ''),
+                var_info.get('type', ''),
+                var_info.get('scope', '')
+            ])
+            
+            if var_info.get('scope') == 'local':
+                local_vars.append(item)
+            else:
+                global_vars.append(item)
+        
+        # Add grouped items
+        if local_vars:
+            local_root = QtWidgets.QTreeWidgetItem(["Local Variables", "", "", ""])
+            local_root.addChildren(local_vars)
+            self.addTopLevelItem(local_root)
+            local_root.setExpanded(True)
+            
+        if global_vars:
+            global_root = QtWidgets.QTreeWidgetItem(["Global Variables", "", "", ""])
+            global_root.addChildren(global_vars)
+            self.addTopLevelItem(global_root)
+
+class CallStackWidget(QtWidgets.QTableWidget):
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(["Level", "Function", "File", "Line"])
+        self.horizontalHeader().setStretchLastSection(True)
+        
+    def update_call_stack(self, call_stack):
+        """Update the call stack display"""
+        self.setRowCount(len(call_stack))
+        
+        for i, frame_info in enumerate(call_stack):
+            self.setItem(i, 0, QtWidgets.QTableWidgetItem(str(frame_info.get('level', i))))
+            self.setItem(i, 1, QtWidgets.QTableWidgetItem(frame_info.get('function', '')))
+            self.setItem(i, 2, QtWidgets.QTableWidgetItem(frame_info.get('filename', '')))
+            self.setItem(i, 3, QtWidgets.QTableWidgetItem(str(frame_info.get('line', ''))))
+                
+    def set_conditional_breakpoint(self, line_number):
+        condition, ok = QtWidgets.QInputDialog.getText(
+            self, "Conditional Breakpoint", 
+            f"Enter condition for breakpoint at line {line_number}:", 
+            text=self.breakpoints.get(line_number, {}).get('condition', '')
+        )
+        
+        if ok:
+            if condition.strip():
+                self.set_breakpoint(line_number, condition.strip())
+            else:
+                self.set_breakpoint(line_number)
+    
+    def closeEvent(self, event):
+        """Ensure proper cleanup when debugger dialog is closed"""
+        if self.debugger_active:
+            self.debug_stop()
+        event.accept()
+
+class EnhancedLineCountWidget(QtWidgets.QWidget):
+    breakpoint_toggled = QtCore.pyqtSignal(int)
+    conditional_breakpoint = QtCore.pyqtSignal(int)
+    
+    def __init__(self):
+        super().__init__()
+        self.breakpoints = set()
+        self.setFixedWidth(50)
+        
+    def add_breakpoint(self, line_number):
+        self.breakpoints.add(line_number)
+        self.update()
+        
+    def remove_breakpoint(self, line_number):
+        self.breakpoints.discard(line_number)
+        self.update()
+        
+    def clear_breakpoints(self):
+        self.breakpoints.clear()
+        self.update()
+        
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            line_number = self.get_line_at_position(event.pos())
+            if line_number:
+                self.breakpoint_toggled.emit(line_number)
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            line_number = self.get_line_at_position(event.pos())
+            if line_number:
+                self.conditional_breakpoint.emit(line_number)
+                
+    def get_line_at_position(self, pos):
+        # Calculate line number from position
+        return pos.y() // 20 + 1  # Simplified calculation
+        
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.fillRect(event.rect(), QtGui.QColor(240, 240, 240))
+        
+        # Draw breakpoints
+        for line_num in self.breakpoints:
+            y = (line_num - 1) * 20
+            painter.fillRect(5, y + 2, 10, 16, QtGui.QColor(255, 0, 0))
+
+class EnhancedCodeView(QtWidgets.QPlainTextEdit):
+    line_clicked = QtCore.pyqtSignal(int)
+    
+    def __init__(self):
+        super().__init__()
+        self.current_file = None
+        self.highlighted_line = None
+        self.setReadOnly(True)
+        
+    def set_code(self, code, file_path):
+        self.setPlainText(code)
+        self.current_file = file_path
+        
+    def highlight_line(self, line_number):
+        self.highlighted_line = line_number
+        # Implementation for line highlighting
+        cursor = self.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+        for _ in range(line_number - 1):
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Down)
+        cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
+        
+        selection = QtWidgets.QTextEdit.ExtraSelection()
+        selection.format.setBackground(QtGui.QColor(255, 255, 0, 100))
+        selection.cursor = cursor
+        self.setExtraSelections([selection])
+        
+    def clear_highlight(self):
+        self.setExtraSelections([])
+        self.highlighted_line = None
+        
+    def get_current_line(self):
+        cursor = self.textCursor()
+        return cursor.blockNumber() + 1
+        
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            cursor = self.cursorForPosition(event.pos())
+            line_number = cursor.blockNumber() + 1
+            self.line_clicked.emit(line_number)
+        super().mousePressEvent(event)
+
+class AdvancedVariablesWidget(QtWidgets.QTreeWidget):
+    def __init__(self):
+        super().__init__()
+        self.setHeaderLabels(["Name", "Value", "Type", "Scope"])
+        self.setColumnWidth(0, 150)
+        self.setColumnWidth(1, 200)
+        self.setColumnWidth(2, 100)
+        
+    def update_variables(self, variables):
+        self.clear()
+        
+        # Group by scope
+        local_items = []
+        global_items = []
+        
+        for name, info in variables.items():
+            item = QtWidgets.QTreeWidgetItem([name, info['value'], info['type'], info['scope']])
+            if info['scope'] == 'local':
+                local_items.append(item)
+            else:
+                global_items.append(item)
+                
+        if local_items:
+            local_root = QtWidgets.QTreeWidgetItem(["Local Variables", "", "", ""])
+            local_root.addChildren(local_items)
+            self.addTopLevelItem(local_root)
+            local_root.setExpanded(True)
+            
+        if global_items:
+            global_root = QtWidgets.QTreeWidgetItem(["Global Variables", "", "", ""])
+            global_root.addChildren(global_items)
+            self.addTopLevelItem(global_root)
+
+class CallStackWidget(QtWidgets.QTableWidget):
+    frame_selected = QtCore.pyqtSignal(dict)
+    
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(["Level", "Function", "File", "Line"])
+        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.cellClicked.connect(self.on_frame_clicked)
+        
+    def update_stack(self, stack_frames):
+        self.setRowCount(len(stack_frames))
+        
+        for row, frame in enumerate(stack_frames):
+            self.setItem(row, 0, QtWidgets.QTableWidgetItem(str(frame['level'])))
+            self.setItem(row, 1, QtWidgets.QTableWidgetItem(frame['function']))
+            self.setItem(row, 2, QtWidgets.QTableWidgetItem(os.path.basename(frame['filename'])))
+            self.setItem(row, 3, QtWidgets.QTableWidgetItem(str(frame['line'])))
+            
+        self.resizeColumnsToContents()
+        
+    def on_frame_clicked(self, row, column):
+        if row < self.rowCount():
+            frame_info = {
+                'level': int(self.item(row, 0).text()),
+                'function': self.item(row, 1).text(),
+                'filename': self.item(row, 2).text(),
+                'line': int(self.item(row, 3).text())
+            }
+            self.frame_selected.emit(frame_info)
+
+class BreakpointsWidget(QtWidgets.QTableWidget):
+    breakpoint_changed = QtCore.pyqtSignal(int, str, bool)
+    
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(["Line", "Condition", "Enabled", "Hit Count"])
+        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        
+    def add_breakpoint(self, line_number, condition=None):
+        row = self.rowCount()
+        self.insertRow(row)
+        
+        self.setItem(row, 0, QtWidgets.QTableWidgetItem(str(line_number)))
+        self.setItem(row, 1, QtWidgets.QTableWidgetItem(condition or ""))
+        
+        checkbox = QtWidgets.QCheckBox()
+        checkbox.setChecked(True)
+        self.setCellWidget(row, 2, checkbox)
+        
+        self.setItem(row, 3, QtWidgets.QTableWidgetItem("0"))
+        
+    def remove_breakpoint(self, line_number):
+        for row in range(self.rowCount()):
+            if self.item(row, 0).text() == str(line_number):
+                self.removeRow(row)
+                break
+                
+    def clear_all(self):
+        self.setRowCount(0)
+
+class CallStackWidget(QtWidgets.QWidget):
+    frame_selected = QtCore.pyqtSignal(int)
+    
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        self.stack_list = QtWidgets.QListWidget()
+        self.stack_list.itemClicked.connect(self.on_frame_selected)
+        layout.addWidget(self.stack_list)
+        
+    def on_frame_selected(self, item):
+        frame_level = self.stack_list.row(item)
+        self.frame_selected.emit(frame_level)
+        
+    def update_call_stack(self, call_stack):
+        self.stack_list.clear()
+        for i, frame in enumerate(call_stack):
+            frame_text = f"{frame.get('function', 'unknown')} - {frame.get('filename', 'unknown')}:{frame.get('lineno', 0)}"
+            self.stack_list.addItem(frame_text)
+
+class BreakpointsWidget(QtWidgets.QWidget):
+    breakpoint_changed = QtCore.pyqtSignal(str, int, bool)
+    
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Toolbar for breakpoint actions
+        toolbar = QtWidgets.QHBoxLayout()
+        self.clear_all_btn = QtWidgets.QPushButton("Clear All")
+        self.clear_all_btn.clicked.connect(self.clear_all_breakpoints)
+        toolbar.addWidget(self.clear_all_btn)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        
+        # Breakpoints list
+        self.breakpoints_list = QtWidgets.QTreeWidget()
+        self.breakpoints_list.setHeaderLabels(["File", "Line", "Condition"])
+        layout.addWidget(self.breakpoints_list)
+        
+    def add_breakpoint(self, file_path, line_number, condition=None):
+        item = QtWidgets.QTreeWidgetItem([
+            os.path.basename(file_path),
+            str(line_number),
+            condition or ""
+        ])
+        item.setData(0, QtCore.Qt.ItemDataRole.UserRole, (file_path, line_number))
+        self.breakpoints_list.addTopLevelItem(item)
+        
+    def remove_breakpoint(self, file_path, line_number):
+        for i in range(self.breakpoints_list.topLevelItemCount()):
+            item = self.breakpoints_list.topLevelItem(i)
+            data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+            if data and data == (file_path, line_number):
+                self.breakpoints_list.takeTopLevelItem(i)
+                break
+                
+    def clear_all_breakpoints(self):
+        self.breakpoints_list.clear()
+        self.breakpoint_changed.emit("", 0, False)
+
+class WatchWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Add watch input
+        input_layout = QtWidgets.QHBoxLayout()
+        self.watch_entry = QtWidgets.QLineEdit()
+        self.watch_entry.setPlaceholderText("Enter expression to watch")
+        input_layout.addWidget(self.watch_entry)
+        
+        add_btn = QtWidgets.QPushButton("Add")
+        input_layout.addWidget(add_btn)
+        
+        layout.addLayout(input_layout)
+        
+        # Watch list
+        self.watch_list = QtWidgets.QTableWidget()
+        self.watch_list.setColumnCount(3)
+        self.watch_list.setHorizontalHeaderLabels(["Expression", "Value", "Type"])
+        layout.addWidget(self.watch_list)
+        
+    def update_values(self, variables):
+        # Update watch expression values based on current variables
+        pass
+
+class DebugOutputWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        self.output_view = QtWidgets.QTextEdit()
+        self.output_view.setReadOnly(True)
+        self.output_view.setFont(QtGui.QFont("Consolas", 10))
+        layout.addWidget(self.output_view)
+        
+    def add_output(self, output_type, text):
+        if output_type == 'stdout':
+            self.output_view.append(f"<span style='color: black;'>{text}</span>")
+        elif output_type == 'stderr':
+            self.output_view.append(f"<span style='color: red;'>{text}</span>")
+            
+    def add_error(self, error_msg):
+        self.output_view.append(f"<span style='color: red; font-weight: bold;'>Error: {error_msg}</span>")
+        
+    def add_warning(self, warning_msg):
+        self.output_view.append(f"<span style='color: orange; font-weight: bold;'>Warning: {warning_msg}</span>")
+        
+    def clear(self):
+        self.output_view.clear()
+        
+    def add_evaluation(self, expression, result):
+        if result.get('success'):
+            self.output_view.append(f"<span style='color: blue;'>>>> {expression}</span>")
+            self.output_view.append(f"<span style='color: green;'>{result['result']}</span>")
+        else:
+            self.output_view.append(f"<span style='color: blue;'>>>> {expression}</span>")
+            self.output_view.append(f"<span style='color: red;'>Error: {result['error']}</span>")
+
+class ProfilerWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        self.profile_view = QtWidgets.QTableWidget()
+        self.profile_view.setColumnCount(4)
+        self.profile_view.setHorizontalHeaderLabels(["Function", "Calls", "Time", "Cumulative"])
+        layout.addWidget(self.profile_view)
+
+class MemoryWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        self.memory_info = QtWidgets.QTextEdit()
+        self.memory_info.setReadOnly(True)
+        layout.addWidget(self.memory_info)
+        
+    def update_memory_info(self, memory_data):
+        info_text = f"""
+Memory Usage: {memory_data.get('memory_percent', 0):.1f}%
+Resident Set Size: {memory_data.get('memory_info', {}).get('rss', 0) / 1024 / 1024:.1f} MB
+Virtual Memory Size: {memory_data.get('memory_info', {}).get('vms', 0) / 1024 / 1024:.1f} MB
+CPU Usage: {memory_data.get('cpu_percent', 0):.1f}%
+"""
+        self.memory_info.setPlainText(info_text)
+
+class ExceptionWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        self.exception_view = QtWidgets.QTextEdit()
+        self.exception_view.setReadOnly(True)
+        layout.addWidget(self.exception_view)
+        
+    def show_exception(self, exception_info):
+        exception_text = f"""
+Exception Type: {exception_info['type']}
+Message: {exception_info['message']}
+File: {exception_info['frame']['filename']}
+Function: {exception_info['frame']['function']}
+Line: {exception_info['frame']['line']}
+
+Traceback:
+{exception_info['traceback']}
+"""
+        self.exception_view.setPlainText(exception_text)
+            
+# Legacy debugger class renamed for compatibility
+class debugger(AdvancedDebugger):
+    def __init__(self):
+        super().__init__()
+        
+    def set_current_editor(self, editor):
+        self.current_editor = editor
         if self.debugger_active and self.debug_process:
             self.append_output("<i>Attempting to pause execution...</i>")
             # Try to send CTRL+C to the process (platform-dependent)
@@ -1127,6 +2925,9 @@ class debugger(QtWidgets.QDialog):
             if name in self.current_locals or (name.startswith('__') and name.endswith('__')):
                 continue
             self._add_variable_to_tree(f"(global) {name}", value)
+        
+        # Update watch expressions with the new variable values
+        self.update_watch_expressions()
     
     def _add_variable_to_tree(self, name, value, parent=None):
         item = QtWidgets.QTreeWidgetItem(parent or self.var_inspector)
@@ -1225,361 +3026,700 @@ class debugger(QtWidgets.QDialog):
             if condition:
                 self.execute_command(f"condition {line} {condition}")
     
+    def remove_breakpoint(self, file, line):
+        """Remove a breakpoint from the list"""
+        for i, bp in enumerate(self.breakpoints):
+            if bp['file'] == file and bp['line'] == line:
+                self.breakpoints.pop(i)
+                self.breakpoints_list.removeRow(i)
+                if self.debugger_active and self.debug_process:
+                    self.execute_command(f"clear {file}:{line}")
+                break
+    
+    def toggle_breakpoint(self, line_number):
+        """Toggle breakpoint at the given line number"""
+        current_file = self.current_file or "untitled"
+        
+        # Check if breakpoint already exists
+        for bp in self.breakpoints:
+            if bp['file'] == current_file and bp['line'] == line_number:
+                self.remove_breakpoint(current_file, line_number)
+                return
+        
+        # Add new breakpoint
+        self.add_breakpoint(current_file, line_number)
+    
+    def add_watch_expression(self):
+        """Add a new watch expression"""
+        expression = self.watch_entry.text().strip()
+        if not expression:
+            return
+            
+        # Check if expression already exists
+        for row in range(self.watch_list.rowCount()):
+            if self.watch_list.item(row, 0).text() == expression:
+                return  # Expression already exists
+        
+        row = self.watch_list.rowCount()
+        self.watch_list.insertRow(row)
+        self.watch_list.setItem(row, 0, QtWidgets.QTableWidgetItem(expression))
+        self.watch_list.setItem(row, 1, QtWidgets.QTableWidgetItem("Not evaluated"))
+        self.watch_list.setItem(row, 2, QtWidgets.QTableWidgetItem(""))
+        
+        # Clear the input field
+        self.watch_entry.clear()
+        
+        # Update watch values if debugger is active
+        if self.debugger_active:
+            self.update_watch_expressions()
+    
+    def remove_watch_expression(self):
+        """Remove selected watch expression"""
+        current_row = self.watch_list.currentRow()
+        if current_row >= 0:
+            self.watch_list.removeRow(current_row)
+    
+    def update_watch_expressions(self):
+        """Update all watch expression values"""
+        if not self.debugger_active:
+            return
+            
+        for row in range(self.watch_list.rowCount()):
+            expression = self.watch_list.item(row, 0).text()
+            try:
+                # Evaluate the expression using current locals and globals
+                result = eval(expression, self.current_globals, self.current_locals)
+                value_str = str(result)
+                type_str = type(result).__name__
+                
+                # Truncate very long values
+                if len(value_str) > 100:
+                    value_str = value_str[:97] + "..."
+                    
+                self.watch_list.setItem(row, 1, QtWidgets.QTableWidgetItem(value_str))
+                self.watch_list.setItem(row, 2, QtWidgets.QTableWidgetItem(type_str))
+                
+                # Color coding for different types
+                value_item = self.watch_list.item(row, 1)
+                if isinstance(result, (int, float)):
+                    value_item.setForeground(QtGui.QColor("#FF9E3B"))
+                elif isinstance(result, str):
+                    value_item.setForeground(QtGui.QColor("#98D982"))
+                elif isinstance(result, bool):
+                    value_item.setForeground(QtGui.QColor("#7E9CD8"))
+                elif result is None:
+                    value_item.setForeground(QtGui.QColor("#717C7C"))
+                else:
+                    value_item.setForeground(QtGui.QColor("#000000"))
+                    
+            except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                self.watch_list.setItem(row, 1, QtWidgets.QTableWidgetItem(error_msg))
+                self.watch_list.setItem(row, 2, QtWidgets.QTableWidgetItem("Error"))
+                
+                # Color error messages red
+                error_item = self.watch_list.item(row, 1)
+                error_item.setForeground(QtGui.QColor("#E06C75"))
+    
     def closeEvent(self, event):
         if self.debugger_active and self.debug_process:
             self.debug_stop()
         event.accept()
 
-class CodeAutoCompleter(QtWidgets.QCompleter):
+class AdvancedCodeCompleter(QtWidgets.QCompleter):
+    """
+    Professional IDE-style code completer with advanced features:
+    - Intelligent context analysis
+    - Function signatures and documentation
+    - Smart import suggestions
+    - Type inference
+    - Fuzzy matching
+    - Rich categorization with icons
+    """
+    
+    # Completion item types with priority and styling
+    COMPLETION_TYPES = {
+        'keyword': {'priority': 10, 'icon': '🔤', 'color': '#bb9af7', 'desc': 'Python keyword'},
+        'builtin': {'priority': 20, 'icon': '⚡', 'color': '#7dcfff', 'desc': 'Built-in function'},
+        'function': {'priority': 30, 'icon': '𝑓', 'color': '#7aa2f7', 'desc': 'Function'},
+        'method': {'priority': 35, 'icon': '⚙', 'color': '#7aa2f7', 'desc': 'Method'},
+        'class': {'priority': 40, 'icon': '🏗', 'color': '#f7768e', 'desc': 'Class'},
+        'module': {'priority': 50, 'icon': '📦', 'color': '#9ece6a', 'desc': 'Module'},
+        'variable': {'priority': 60, 'icon': '🔗', 'color': '#e0af68', 'desc': 'Variable'},
+        'parameter': {'priority': 65, 'icon': '📋', 'color': '#ff9e64', 'desc': 'Parameter'},
+        'attribute': {'priority': 70, 'icon': '🔧', 'color': '#89ddff', 'desc': 'Attribute'},
+        'constant': {'priority': 80, 'icon': '🔒', 'color': '#ff7a93', 'desc': 'Constant'},
+        'import': {'priority': 90, 'icon': '📥', 'color': '#9ece6a', 'desc': 'Import suggestion'},
+        'snippet': {'priority': 100, 'icon': '✂', 'color': '#c0caf5', 'desc': 'Code snippet'}
+    }
+    
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # Configure completer behavior
         self.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
         self.setCompletionMode(QtWidgets.QCompleter.CompletionMode.PopupCompletion)
         self.setWrapAround(False)
-        self.activated.connect(self.insertCompletion)
+        self.setMaxVisibleItems(15)
+        self.setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
         
-        # Cache for module contents
+        # Advanced caching system
         self.module_cache = {}
+        self.type_cache = {}
+        self.function_signatures = {}
+        self.documentation_cache = {}
         
-        # Initialize with built-ins and common modules
-        self.updateCompletionList()
+        # Context analysis state
+        self.current_context = {}
+        self.local_scope = {}
+        self.import_scope = set()
         
-        # Set popup styling
-        self.popup().setStyleSheet("""
+        # Code snippets for common patterns
+        self.code_snippets = {
+            'ifmain': 'if __name__ == "__main__":\n    ${cursor}',
+            'tryexcept': 'try:\n    ${cursor}\nexcept Exception as e:\n    pass',
+            'defclass': 'class ${ClassName}:\n    def __init__(self):\n        ${cursor}',
+            'defmethod': 'def ${method_name}(self, ${params}):\n    """${docstring}"""\n    ${cursor}',
+            'deffunction': 'def ${function_name}(${params}):\n    """${docstring}"""\n    ${cursor}',
+            'forloop': 'for ${item} in ${iterable}:\n    ${cursor}',
+            'whileloop': 'while ${condition}:\n    ${cursor}',
+            'withopen': 'with open(${filename}, ${mode}) as ${file}:\n    ${cursor}',
+            'listcomp': '[${expression} for ${item} in ${iterable}]',
+            'dictcomp': '{${key}: ${value} for ${item} in ${iterable}}',
+            'setcomp': '{${expression} for ${item} in ${iterable}}',
+            'genexp': '(${expression} for ${item} in ${iterable})',
+            'lambda': 'lambda ${params}: ${expression}',
+            'property': '@property\ndef ${name}(self):\n    """${docstring}"""\n    return self._${name}',
+            'staticmethod': '@staticmethod\ndef ${name}(${params}):\n    """${docstring}"""\n    ${cursor}',
+            'classmethod': '@classmethod\ndef ${name}(cls, ${params}):\n    """${docstring}"""\n    ${cursor}',
+            'dataclass': '@dataclass\nclass ${ClassName}:\n    ${field}: ${type}',
+            'async_def': 'async def ${function_name}(${params}):\n    """${docstring}"""\n    ${cursor}',
+            'await': 'await ${expression}',
+            'typing_import': 'from typing import ${types}',
+            'pathlib': 'from pathlib import Path',
+            'datetime': 'from datetime import datetime, date, time'
+        }
+        
+        # Initialize completion system
+        self.initialize_completion_data()
+        self.setup_advanced_popup()
+        
+        # Connect signals
+        self.activated.connect(self.insert_completion)
+        self.highlighted.connect(self.show_completion_tooltip)
+    
+    def initialize_completion_data(self):
+        """Initialize the comprehensive completion database"""
+        self.completion_items = []
+        
+        # Add Python keywords
+        for kw in keyword.kwlist:
+            self.add_completion_item(kw, 'keyword', doc=f"Python keyword: {kw}")
+        
+        # Add built-in functions with signatures
+        self.add_builtin_functions()
+        
+        # Add standard library modules
+        self.add_standard_modules()
+        
+        # Add code snippets
+        for name, template in self.code_snippets.items():
+            self.add_completion_item(name, 'snippet', 
+                                   doc=f"Code snippet: {template.split('${')[0].strip()}")
+        
+        # Create the initial model
+        self.update_completion_model()
+    
+    def add_builtin_functions(self):
+        """Add built-in functions with type hints and documentation"""
+        builtin_signatures = {
+            'len': 'len(obj: Sized) -> int',
+            'range': 'range(start: int, stop: int = None, step: int = 1) -> range',
+            'enumerate': 'enumerate(iterable: Iterable[T], start: int = 0) -> Iterator[Tuple[int, T]]',
+            'zip': 'zip(*iterables: Iterable) -> Iterator[Tuple]',
+            'map': 'map(function: Callable, iterable: Iterable) -> Iterator',
+            'filter': 'filter(function: Callable, iterable: Iterable) -> Iterator',
+            'sorted': 'sorted(iterable: Iterable, *, key: Callable = None, reverse: bool = False) -> List',
+            'sum': 'sum(iterable: Iterable[Number], start: Number = 0) -> Number',
+            'max': 'max(iterable: Iterable, *, key: Callable = None) -> Any',
+            'min': 'min(iterable: Iterable, *, key: Callable = None) -> Any',
+            'abs': 'abs(x: Number) -> Number',
+            'round': 'round(number: float, ndigits: int = None) -> Union[int, float]',
+            'isinstance': 'isinstance(obj: Any, classinfo: Union[type, Tuple[type, ...]]) -> bool',
+            'hasattr': 'hasattr(obj: Any, name: str) -> bool',
+            'getattr': 'getattr(obj: Any, name: str, default: Any = None) -> Any',
+            'setattr': 'setattr(obj: Any, name: str, value: Any) -> None',
+            'open': 'open(file: str, mode: str = "r", encoding: str = None) -> IO',
+            'print': 'print(*values: Any, sep: str = " ", end: str = "\\n", file: IO = None) -> None'
+        }
+        
+        for name in dir(__builtins__):
+            if not name.startswith('_'):
+                signature = builtin_signatures.get(name, f"{name}(...)")
+                doc = f"Built-in function: {signature}"
+                self.add_completion_item(name, 'builtin', signature=signature, doc=doc)
+    
+    def add_standard_modules(self):
+        """Add standard library modules with documentation"""
+        common_modules = {
+            'os': 'Operating system interface',
+            'sys': 'System-specific parameters and functions',
+            'json': 'JSON encoder and decoder',
+            'datetime': 'Basic date and time types',
+            'math': 'Mathematical functions',
+            'random': 'Generate random numbers',
+            'collections': 'Specialized container datatypes',
+            'itertools': 'Functions creating iterators for efficient looping',
+            'functools': 'Higher-order functions and operations on callable objects',
+            'pathlib': 'Object-oriented filesystem paths',
+            'typing': 'Support for type hints',
+            're': 'Regular expression operations',
+            'urllib': 'URL handling modules',
+            'http': 'HTTP modules',
+            'sqlite3': 'DB-API 2.0 interface for SQLite databases',
+            'csv': 'CSV file reading and writing',
+            'xml': 'XML processing modules',
+            'email': 'Package supporting email handling',
+            'logging': 'Logging facility for Python',
+            'unittest': 'Unit testing framework',
+            'pickle': 'Python object serialization',
+            'base64': 'RFC 3548: Base16, Base32, Base64 Data Encodings',
+            'hashlib': 'Secure hash and message digest algorithms',
+            'uuid': 'UUID objects according to RFC 4122',
+            'threading': 'Thread-based parallelism',
+            'multiprocessing': 'Process-based parallelism',
+            'asyncio': 'Asynchronous I/O',
+            'subprocess': 'Subprocess management',
+            'shutil': 'High-level file operations',
+            'glob': 'Unix shell style pathname pattern expansion',
+            'tempfile': 'Generate temporary files and directories'
+        }
+        
+        for module, description in common_modules.items():
+            self.add_completion_item(module, 'module', doc=description)
+    
+    def add_completion_item(self, text, item_type, signature=None, doc=None, priority_boost=0):
+        """Add a completion item with metadata"""
+        type_info = self.COMPLETION_TYPES.get(item_type, self.COMPLETION_TYPES['variable'])
+        
+        item = {
+            'text': text,
+            'type': item_type,
+            'display': f"{type_info['icon']} {text}",
+            'signature': signature or text,
+            'documentation': doc or f"{type_info['desc']}: {text}",
+            'priority': type_info['priority'] + priority_boost,
+            'color': type_info['color']
+        }
+        
+        self.completion_items.append(item)
+    
+    def setup_advanced_popup(self):
+        """Configure the popup with Tokyo Night styling and custom rendering"""
+        popup = self.popup()
+        popup.setStyleSheet("""
             QListView {
-                background-color: #2E3440;
-                color: #D8DEE9;
-                border: 1px solid #4C566A;
-                font-family: monospace;
+                background-color: #1a1b26;
+                color: #c0caf5;
+                border: 2px solid #414868;
+                border-radius: 8px;
+                font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+                font-size: 12px;
+                padding: 4px;
+                outline: none;
+                selection-background-color: transparent;
+            }
+            QListView::item {
+                padding: 6px 12px;
+                border-radius: 4px;
+                margin: 1px;
+                min-height: 24px;
             }
             QListView::item:selected {
-                background-color: #5E81AC;
-                color: #ECEFF4;
+                background-color: #7aa2f7;
+                color: #1a1b26;
+                font-weight: bold;
+            }
+            QListView::item:hover {
+                background-color: #414868;
+                color: #c0caf5;
             }
         """)
-
-    def updateCompletionList(self):
-        """Update the completion list with builtins and modules"""
-        # Gather built-in functions and keywords
-        builtins_list = sorted([f for f in dir(__builtins__) if not f.startswith('_')])
-        keyword_list = sorted(keyword.kwlist)
         
-        # Get standard library modules
-        modules_list = sorted([m.name for m in pkgutil.iter_modules()])
+        # Set minimum size for better visibility
+        popup.setMinimumWidth(400)
+        popup.setMinimumHeight(200)
         
-        # Create categorized completion items
-        completions = []
+        # Override the popup positioning to always show below cursor
+        self.popup_widget = popup
+        self.original_complete = self.complete
+        self.complete = self.custom_complete
+    
+    def analyze_context(self, text, cursor_position):
+        """Perform intelligent context analysis"""
+        # Extract current line and position
+        lines = text[:cursor_position].split('\n')
+        current_line = lines[-1] if lines else ""
+        line_number = len(lines)
         
-        # Add keywords with category prefix for potential icon display
-        for kw in keyword_list:
-            completions.append(f"keyword:{kw}")
+        context = {
+            'line': current_line,
+            'line_number': line_number,
+            'position': cursor_position,
+            'is_import': self.is_import_context(current_line),
+            'is_function_call': self.is_function_call_context(current_line),
+            'is_attribute_access': '.' in current_line.split()[-1] if current_line.split() else False,
+            'indentation_level': len(current_line) - len(current_line.lstrip()),
+            'in_string': self.is_in_string_context(text, cursor_position),
+            'in_comment': current_line.strip().startswith('#'),
+            'local_variables': self.extract_local_variables(text, line_number),
+            'imports': self.extract_imports(text),
+            'functions': self.extract_functions(text),
+            'classes': self.extract_classes(text)
+        }
+        
+        return context
+    
+    def is_import_context(self, line):
+        """Check if we're in an import statement"""
+        stripped = line.strip()
+        return (stripped.startswith('import ') or 
+                stripped.startswith('from ') or
+                'import' in stripped.split())
+    
+    def is_function_call_context(self, line):
+        """Check if we're in a function call"""
+        return '(' in line and not line.strip().endswith(')')
+    
+    def is_in_string_context(self, text, position):
+        """Check if cursor is inside a string literal"""
+        before_cursor = text[:position]
+        single_quotes = before_cursor.count("'") - before_cursor.count("\\'")
+        double_quotes = before_cursor.count('"') - before_cursor.count('\\"')
+        triple_single = before_cursor.count("'''")
+        triple_double = before_cursor.count('"""')
+        
+        return (single_quotes % 2 == 1 or double_quotes % 2 == 1 or
+                triple_single % 2 == 1 or triple_double % 2 == 1)
+    
+    def extract_local_variables(self, text, current_line):
+        """Extract variable assignments from the current scope"""
+        variables = set()
+        lines = text.split('\n')[:current_line]
+        
+        # Simple variable assignment pattern
+        var_pattern = re.compile(r'^\s*([a-zA-Z_]\w*)\s*=')
+        
+        # Function parameter pattern
+        func_pattern = re.compile(r'def\s+\w+\s*\(([^)]*)\)')
+        
+        for line in lines:
+            # Check for variable assignments
+            var_match = var_pattern.match(line)
+            if var_match and not keyword.iskeyword(var_match.group(1)):
+                variables.add(var_match.group(1))
             
-        # Add builtins with category prefix
-        for func in builtins_list:
-            completions.append(f"builtin:{func}")
-            
-        # Add modules with category prefix
-        for mod in modules_list:
-            completions.append(f"module:{mod}")
+            # Check for function parameters
+            func_match = func_pattern.search(line)
+            if func_match:
+                params = func_match.group(1).split(',')
+                for param in params:
+                    param = param.strip().split('=')[0].strip().split(':')[0].strip()
+                    if param and param != 'self' and not keyword.iskeyword(param):
+                        variables.add(param)
         
-        # Store raw versions for direct insertion
-        self.raw_completions = {}
-        for item in completions:
-            category, value = item.split(':', 1)
-            self.raw_completions[item] = value
+        return variables
+    
+    def extract_imports(self, text):
+        """Extract imported modules and their aliases"""
+        imports = set()
+        import_pattern = re.compile(r'^\s*(?:from\s+(\S+)\s+)?import\s+(.+)', re.MULTILINE)
+        
+        for match in import_pattern.finditer(text):
+            module, items = match.groups()
+            if module:
+                imports.add(module)
             
-        # Set the model with all categories included
-        self.setModel(QtCore.QStringListModel(completions))
-
+            # Parse imported items
+            for item in items.split(','):
+                item = item.strip().split(' as ')[0].strip()
+                if item and item != '*':
+                    imports.add(item)
+        
+        return imports
+    
+    def extract_functions(self, text):
+        """Extract function definitions"""
+        functions = set()
+        func_pattern = re.compile(r'^\s*def\s+([a-zA-Z_]\w*)\s*\(', re.MULTILINE)
+        
+        for match in func_pattern.finditer(text):
+            functions.add(match.group(1))
+        
+        return functions
+    
+    def extract_classes(self, text):
+        """Extract class definitions"""
+        classes = set()
+        class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_]\w*)', re.MULTILINE)
+        
+        for match in class_pattern.finditer(text):
+            classes.add(match.group(1))
+        
+        return classes
+    
     def setCompletionPrefix(self, prefix):
-        """Set the completion prefix and update context-sensitive completions"""
-        if not prefix or len(prefix) < 2:
+        """Enhanced prefix handling with intelligent filtering"""
+        if not prefix:
             return
-            
+        
         widget = self.widget()
-        if widget is None:
+        if not widget:
             return
-            
-        # Get the text context
+        
+        # Analyze current context
         cursor = widget.textCursor()
         text = widget.toPlainText()
-        pos = cursor.position()
+        context = self.analyze_context(text, cursor.position())
         
-        # Check for module completion context (after import or from statements)
-        line_start = text.rfind('\n', 0, pos) + 1
-        current_line = text[line_start:pos].strip()
-        
-        # Basic context detection
-        if '.' in prefix:
-            # Handle attribute access (module.something)
-            module_name, partial_attr = prefix.rsplit('.', 1)
-            
-            # Try to get module attributes for completion
-            self.updateModuleCompletions(module_name, partial_attr)
-            super().setCompletionPrefix(partial_attr)
-        else:
-            # Default completion behavior
-            # Extract local variables from current document for better context
-            local_vars = self.extractLocalVariables(text)
-            
-            # Create a new model with local variables included
-            completions = local_vars + [c for c in self.model().stringList() 
-                                       if not c.startswith("var:")]
-            
-            self.setModel(QtCore.QStringListModel(completions))
-            super().setCompletionPrefix(prefix)
-        
-        # Ensure the popup starts at the first match
-        popup = self.popup()
-        popup.setCurrentIndex(self.completionModel().index(0, 0))
-
-    def updateModuleCompletions(self, module_name, prefix):
-        """Update completion list with module attributes"""
-        try:
-            # Check if we've already cached this module's attributes
-            if module_name not in self.module_cache:
-                # Try to import the module and get its attributes
-                module = __import__(module_name, fromlist=['*'])
-                attrs = dir(module)
-                
-                # Create categorized completions for this module
-                module_completions = []
-                for attr in sorted(attrs):
-                    if attr.startswith('_'):
-                        continue
-                        
-                    # Add category based on attribute type
-                    if callable(getattr(module, attr)):
-                        module_completions.append(f"function:{attr}")
-                    elif isinstance(getattr(module, attr), type):
-                        module_completions.append(f"class:{attr}")
-                    else:
-                        module_completions.append(f"attribute:{attr}")
-                        
-                self.module_cache[module_name] = module_completions
-                
-            # Set model to the cached completions for this module
-            self.setModel(QtCore.QStringListModel(self.module_cache[module_name]))
-                
-        except (ImportError, AttributeError):
-            # If module import fails, use default completions
-            pass
-
-    def extractLocalVariables(self, text):
-        """Extract local variable names from the document text"""
-        var_pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*=\s*')
-        matches = var_pattern.finditer(text)
-        
-        vars_list = []
-        seen = set()
-        for match in matches:
-            var_name = match.group(1)
-            if var_name not in seen and not keyword.iskeyword(var_name):
-                vars_list.append(f"var:{var_name}")
-                seen.add(var_name)
-                
-        return sorted(vars_list)
-
-    def insertCompletion(self, completion):
-        """Insert the raw completion text without category prefix"""
-        if self.widget() is None:
+        # Skip completion in comments or strings (unless it's a special case)
+        if context['in_comment'] or context['in_string']:
             return
-            
-        if ':' in completion:
-            raw_completion = self.raw_completions.get(completion, completion)
-        else:
-            raw_completion = completion.split(':', 1)[1] if ':' in completion else completion
-            
-        cursor = self.widget().textCursor()
-        prefix_len = len(self.completionPrefix())
         
-        if '.' in cursor.block().text()[:cursor.positionInBlock()]:
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Left, 
-                               QtGui.QTextCursor.MoveMode.KeepAnchor, 
-                               prefix_len)
-        else:
-            cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
-            
-        cursor.removeSelectedText()
-        cursor.insertText(raw_completion)
-        self.widget().setTextCursor(cursor)
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
-        self.setCompletionMode(QtWidgets.QCompleter.CompletionMode.PopupCompletion)
-        self.setWrapAround(False)
-        self.activated.connect(self.insertCompletion)
+        # Get context-appropriate completions
+        filtered_items = self.get_contextual_completions(prefix, context)
         
-        # Cache for module contents
-        self.module_cache = {}
+        # Sort by relevance
+        filtered_items.sort(key=lambda x: (
+            x['priority'],
+            -self.calculate_fuzzy_score(prefix.lower(), x['text'].lower()),
+            x['text'].lower()
+        ))
         
-        # Initialize with built-ins and common modules
-        self.updateCompletionList()
+        # Update model with filtered and sorted items
+        display_items = [item['display'] for item in filtered_items[:50]]  # Limit to 50 items
+        self.current_items = {item['display']: item for item in filtered_items[:50]}
         
-        # Set popup styling
-        self.popup().setStyleSheet("""
-            QListView {
-                background-color: #2E3440;
-                color: #D8DEE9;
-                border: 1px solid #4C566A;
-                font-family: monospace;
-            }
-            QListView::item:selected {
-                background-color: #5E81AC;
-                color: #ECEFF4;
-            }
-        """)
-
-    def updateCompletionList(self):
-        """Update the completion list with builtins and modules"""
-        # Gather built-in functions and keywords
-        builtins_list = sorted([f for f in dir(__builtins__) if not f.startswith('_')])
-        keyword_list = sorted(keyword.kwlist)
+        model = QtCore.QStringListModel(display_items)
+        self.setModel(model)
         
-        # Get standard library modules
-        modules_list = sorted([m.name for m in pkgutil.iter_modules()])
-        
-        # Create categorized completion items
+        super().setCompletionPrefix(prefix)
+    
+    def get_contextual_completions(self, prefix, context):
+        """Get completions based on current context"""
         completions = []
         
-        # Add keywords with category prefix for potential icon display
-        for kw in keyword_list:
-            completions.append(f"keyword:{kw}")
-            
-        # Add builtins with category prefix
-        for func in builtins_list:
-            completions.append(f"builtin:{func}")
-            
-        # Add modules with category prefix
-        for mod in modules_list:
-            completions.append(f"module:{mod}")
-        
-        # Store raw versions for direct insertion
-        self.raw_completions = {}
-        for item in completions:
-            category, value = item.split(':', 1)
-            self.raw_completions[item] = value
-            
-        # Set the model with all categories included
-        self.setModel(QtCore.QStringListModel(completions))
-
-    def setCompletionPrefix(self, prefix):
-        """Set the completion prefix and update context-sensitive completions"""
-        if not prefix or len(prefix) < 2:
-            return
-            
-        widget = self.widget()
-        if widget is None:
-            return
-            
-        # Get the text context
-        cursor = widget.textCursor()
-        text = widget.toPlainText()
-        pos = cursor.position()
-        
-        # Check for module completion context (after import or from statements)
-        line_start = text.rfind('\n', 0, pos) + 1
-        current_line = text[line_start:pos].strip()
-        
-        # Basic context detection
-        if '.' in prefix:
-            # Handle attribute access (module.something)
-            module_name, partial_attr = prefix.rsplit('.', 1)
-            
-            # Try to get module attributes for completion
-            self.updateModuleCompletions(module_name, partial_attr)
-            super().setCompletionPrefix(partial_attr)
+        if context['is_import']:
+            # Prioritize modules for import context
+            completions.extend([item for item in self.completion_items 
+                              if item['type'] in ['module', 'builtin']])
+        elif context['is_attribute_access']:
+            # Handle attribute access (obj.attr)
+            obj_name = context['line'].split('.')[-2].split()[-1]
+            completions.extend(self.get_attribute_completions(obj_name, prefix))
         else:
-            # Default completion behavior
-            # Extract local variables from current document for better context
-            local_vars = self.extractLocalVariables(text)
+            # General completion context
+            # Add local variables with high priority
+            for var in context['local_variables']:
+                self.add_completion_item(var, 'variable', priority_boost=-50)
             
-            # Create a new model with local variables included
-            completions = local_vars + [c for c in self.model().stringList() 
-                                       if not c.startswith("var:")]
+            # Add all available completions
+            completions = self.completion_items[:]
+        
+        # Filter by prefix using fuzzy matching
+        if prefix:
+            completions = [item for item in completions 
+                         if self.fuzzy_match(prefix.lower(), item['text'].lower())]
+        
+        return completions
+    
+    def get_attribute_completions(self, obj_name, prefix):
+        """Get attribute completions for an object"""
+        completions = []
+        
+        # Try to get completions from cache or live analysis
+        if obj_name in self.type_cache:
+            obj_type = self.type_cache[obj_name]
+            if obj_type in self.module_cache:
+                for attr in self.module_cache[obj_type]:
+                    if self.fuzzy_match(prefix.lower(), attr.lower()):
+                        completions.append({
+                            'text': attr,
+                            'type': 'attribute',
+                            'display': f"🔧 {attr}",
+                            'signature': f"{obj_name}.{attr}",
+                            'documentation': f"Attribute of {obj_name}",
+                            'priority': 30,
+                            'color': '#89ddff'
+                        })
+        
+        return completions
+    
+    def fuzzy_match(self, pattern, text):
+        """Simple fuzzy matching algorithm"""
+        if not pattern:
+            return True
+        
+        if pattern in text:
+            return True
+        
+        # Check if all characters of pattern appear in order in text
+        pattern_idx = 0
+        for char in text:
+            if pattern_idx < len(pattern) and char == pattern[pattern_idx]:
+                pattern_idx += 1
+        
+        return pattern_idx == len(pattern)
+    
+    def calculate_fuzzy_score(self, pattern, text):
+        """Calculate fuzzy match score for sorting"""
+        if pattern == text:
+            return 1000
+        if text.startswith(pattern):
+            return 500
+        if pattern in text:
+            return 100
+        
+        # Simple character-order-based scoring
+        score = 0
+        pattern_idx = 0
+        for i, char in enumerate(text):
+            if pattern_idx < len(pattern) and char == pattern[pattern_idx]:
+                score += 10 - i  # Earlier matches score higher
+                pattern_idx += 1
+        
+        return score if pattern_idx == len(pattern) else 0
+    
+    def update_completion_model(self):
+        """Update the completion model with current items"""
+        display_items = [item['display'] for item in self.completion_items]
+        model = QtCore.QStringListModel(display_items)
+        self.setModel(model)
+    
+    def show_completion_tooltip(self, completion):
+        """Show detailed tooltip for the highlighted completion"""
+        if hasattr(self, 'current_items') and completion in self.current_items:
+            item = self.current_items[completion]
+            tooltip_text = f"""<div style="font-family: monospace; font-size: 11px;">
+                <div style="color: {item['color']}; font-weight: bold; margin-bottom: 4px;">
+                    {item['signature']}
+                </div>
+                <div style="color: #9aa5ce; margin-bottom: 6px;">
+                    {item['documentation']}
+                </div>
+            </div>"""
             
-            self.setModel(QtCore.QStringListModel(completions))
-            super().setCompletionPrefix(prefix)
-        
-        # Ensure the popup starts at the first match
-        popup = self.popup()
-        popup.setCurrentIndex(self.completionModel().index(0, 0))
-
-    def updateModuleCompletions(self, module_name, prefix):
-        """Update completion list with module attributes"""
-        try:
-            # Check if we've already cached this module's attributes
-            if module_name not in self.module_cache:
-                # Try to import the module and get its attributes
-                module = __import__(module_name, fromlist=['*'])
-                attrs = dir(module)
-                
-                # Create categorized completions for this module
-                module_completions = []
-                for attr in sorted(attrs):
-                    if attr.startswith('_'):
-                        continue
-                        
-                    # Add category based on attribute type
-                    if callable(getattr(module, attr)):
-                        module_completions.append(f"function:{attr}")
-                    elif isinstance(getattr(module, attr), type):
-                        module_completions.append(f"class:{attr}")
-                    else:
-                        module_completions.append(f"attribute:{attr}")
-                        
-                self.module_cache[module_name] = module_completions
-                
-            # Set model to the cached completions for this module
-            self.setModel(QtCore.QStringListModel(self.module_cache[module_name]))
-                
-        except (ImportError, AttributeError):
-            # If module import fails, use default completions
-            pass
-
-    def extractLocalVariables(self, text):
-        """Extract local variable names from the document text"""
-        # Simple regex to find variable assignments
-        var_pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*=\s*')
-        matches = var_pattern.finditer(text)
-        
-        # Create list of variable completions
-        vars_list = []
-        seen = set()
-        for match in matches:
-            var_name = match.group(1)
-            if var_name not in seen and not keyword.iskeyword(var_name):
-                vars_list.append(f"var:{var_name}")
-                seen.add(var_name)
-                
-        return sorted(vars_list)
-
-    def insertCompletion(self, completion):
-        """Insert the raw completion text without category prefix"""
-        if self.widget() is None:
+            # Show tooltip near the popup
+            popup = self.popup()
+            QtWidgets.QToolTip.showText(
+                popup.mapToGlobal(popup.rect().topRight()),
+                tooltip_text,
+                popup
+            )
+    
+    def insert_completion(self, completion):
+        """Insert the selected completion with intelligent formatting"""
+        if not self.widget():
             return
+        
+        # Get the actual completion item
+        if hasattr(self, 'current_items') and completion in self.current_items:
+            item = self.current_items[completion]
+            text_to_insert = item['text']
             
-        # Extract the raw completion text without category
-        if ':' in completion:
-            raw_completion = self.raw_completions.get(completion, completion)
+            # Handle code snippets
+            if item['type'] == 'snippet':
+                self.insert_snippet(text_to_insert)
+                return
         else:
-            # For locally extracted completions that don't have a cached raw version
-            raw_completion = completion.split(':', 1)[1] if ':' in completion else completion
-            
+            # Fallback to simple text extraction
+            text_to_insert = completion.split(' ', 1)[1] if ' ' in completion else completion
+        
+        # Insert the completion
         cursor = self.widget().textCursor()
-        prefix_len = len(self.completionPrefix())
         
-        # If completing after a dot, only remove the partial attribute name
-        if '.' in cursor.block().text()[:cursor.positionInBlock()]:
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Left, 
-                               QtGui.QTextCursor.MoveMode.KeepAnchor, 
-                               prefix_len)
-        else:
-            cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
-            
-        cursor.removeSelectedText()
-        cursor.insertText(raw_completion)
+        # Select the current word/prefix
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(text_to_insert)
+        
+        # Auto-add parentheses for functions
+        if hasattr(self, 'current_items') and completion in self.current_items:
+            item = self.current_items[completion]
+            if item['type'] in ['function', 'method', 'builtin'] and not text_to_insert.endswith('('):
+                cursor.insertText('()')
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.Left)
+        
         self.widget().setTextCursor(cursor)
+    
+    def insert_snippet(self, snippet_name):
+        """Insert a code snippet with placeholder support"""
+        if snippet_name not in self.code_snippets:
+            return
+        
+        template = self.code_snippets[snippet_name]
+        cursor = self.widget().textCursor()
+        
+        # Replace placeholders with default values
+        processed_template = template.replace('${cursor}', '')
+        
+        # Simple placeholder replacement (could be enhanced with tab stops)
+        placeholders = re.findall(r'\$\{([^}]+)\}', processed_template)
+        for placeholder in placeholders:
+            default_value = placeholder.title() if placeholder.islower() else placeholder
+            processed_template = processed_template.replace(f'${{{placeholder}}}', default_value)
+        
+        # Insert the snippet
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(processed_template)
+        self.widget().setTextCursor(cursor)
+    
+    def custom_complete(self, rect=None):
+        """Custom completion method that forces popup to appear below cursor"""
+        if not self.widget():
+            return
+        
+        # Get the cursor position in the editor
+        cursor = self.widget().textCursor()
+        cursor_rect = self.widget().cursorRect(cursor)
+        
+        # Convert to global coordinates
+        global_cursor_pos = self.widget().mapToGlobal(cursor_rect.bottomLeft())
+        
+        # Calculate popup position (always below cursor)
+        popup_x = global_cursor_pos.x()
+        popup_y = global_cursor_pos.y() + 5  # Small offset below cursor
+        
+        # Get screen geometry to ensure popup stays on screen
+        screen = QtWidgets.QApplication.primaryScreen().geometry()
+        popup_width = self.popup_widget.width()
+        popup_height = self.popup_widget.height()
+        
+        # Adjust horizontal position if popup would go off-screen
+        if popup_x + popup_width > screen.right():
+            popup_x = screen.right() - popup_width
+        if popup_x < screen.left():
+            popup_x = screen.left()
+        
+        # Adjust vertical position if popup would go off-screen (move above cursor only as last resort)
+        if popup_y + popup_height > screen.bottom():
+            # Try to fit above cursor
+            popup_y_above = global_cursor_pos.y() - cursor_rect.height() - popup_height - 5
+            if popup_y_above >= screen.top():
+                popup_y = popup_y_above
+            else:
+                # If can't fit above either, keep below but adjust height
+                popup_y = global_cursor_pos.y() + 5
+                available_height = screen.bottom() - popup_y - 20
+                if available_height > 100:  # Minimum usable height
+                    self.popup_widget.setFixedHeight(available_height)
+        
+        # Position and show the popup
+        self.popup_widget.move(popup_x, popup_y)
+        self.popup_widget.show()
+        
+        # Call the original complete method with custom positioning
+        return self.original_complete(QtCore.QRect(popup_x, popup_y, popup_width, popup_height))
+
     
 class AboutLicenseDialog(QtWidgets.QDialog):
     def __init__(self):
@@ -1944,6 +4084,9 @@ class Pythonico(QtWidgets.QMainWindow):
         self.highlighters = {}
         self.filters = {}
         self.completers = {}
+        self.splitters = {}
+        self.split_editors = {}  # Store split editors
+        self.split_highlighters = {}  # Store split editor highlighters
 
         self.current_file = None
         self.tab_widget = QtWidgets.QTabWidget()
@@ -2035,9 +4178,9 @@ class Pythonico(QtWidgets.QMainWindow):
         if self.current_file:
             tab_name = QtCore.QFileInfo(self.current_file).fileName()
 
-        # Create a SyntaxHighlighter instance and associate it
+        # Create an Advanced Python Syntax Highlighter with Tokyo Night theme
         # with the text editor's document
-        self.highlighter = SyntaxHighlighter(self.editor.document())
+        self.highlighter = AdvancedPythonSyntaxHighlighter(self.editor.document())
 
         # Add the editor widget to a new tab
         tab_index = self.tab_widget.addTab(horizontal_splitter, tab_name)
@@ -2069,10 +4212,14 @@ class Pythonico(QtWidgets.QMainWindow):
         main_splitter.addWidget(terminal_splitter)
 
         self.setCentralWidget(main_splitter)
+        
+        # Create and add project explorer as a dock widget
+        self.project_explorer = ProjectExplorer(self)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, self.project_explorer)
 
-        # Create a SyntaxHighlighter instance and associate it
+        # Create an Advanced Python Syntax Highlighter with Tokyo Night theme
         # with the text editor's document
-        self.highlighter = SyntaxHighlighter(self.editor.document())
+        self.highlighter = AdvancedPythonSyntaxHighlighter(self.editor.document())
 
         # Set the width of the editor widget within the splitter
         main_splitter.setSizes([600, 300])
@@ -2096,7 +4243,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
         
-        self.completer = CodeAutoCompleter()
+        self.completer = AdvancedCodeCompleter()
         self.completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
         self.completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
         self.completer.setWrapAround(False)
@@ -2234,6 +4381,11 @@ class Pythonico(QtWidgets.QMainWindow):
         find_action.setShortcut(QtGui.QKeySequence.StandardKey.Find)
         find_action.triggered.connect(self.show_find_dialog)
         find_menu.addAction(find_action)
+        
+        replace_action = QtGui.QAction("Replace", self)
+        replace_action.setShortcut(QtGui.QKeySequence.StandardKey.Replace)
+        replace_action.triggered.connect(self.show_find_dialog)
+        find_menu.addAction(replace_action)
 
         # Separator
         find_menu.addSeparator()
@@ -2257,7 +4409,12 @@ class Pythonico(QtWidgets.QMainWindow):
         find_menu.addAction(go_to_line_action)
 
         # View menu
-        view_menu = menubar.addMenu("&View")   
+        view_menu = menubar.addMenu("&View") 
+        
+        explorer_action = QtGui.QAction("Toggle Project Explorer", self)
+        explorer_action.setShortcut(QtGui.QKeySequence("Ctrl+E"))
+        explorer_action.triggered.connect(self.toggleProjectExplorer)
+        view_menu.addAction(explorer_action)  
         
         claude_action = QtGui.QAction("Toggle AI Prompt", self)
         claude_action.setShortcut(QtGui.QKeySequence("Ctrl+I"))
@@ -2268,6 +4425,24 @@ class Pythonico(QtWidgets.QMainWindow):
         terminal_action.setShortcut(QtGui.QKeySequence("Ctrl+T"))
         terminal_action.triggered.connect(self.toggleTerminal)
         view_menu.addAction(terminal_action)
+        
+        # Add split view actions
+        view_menu.addSeparator()
+        
+        split_horizontal_action = QtGui.QAction("Split Horizontal", self)
+        split_horizontal_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+H"))
+        split_horizontal_action.triggered.connect(self.split_horizontal)
+        view_menu.addAction(split_horizontal_action)
+        
+        split_vertical_action = QtGui.QAction("Split Vertical", self)
+        split_vertical_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+V"))
+        split_vertical_action.triggered.connect(self.split_vertical)
+        view_menu.addAction(split_vertical_action)
+        
+        close_split_action = QtGui.QAction("Close Split", self)
+        close_split_action.setShortcut(QtGui.QKeySequence("Ctrl+Shift+W"))
+        close_split_action.triggered.connect(self.close_split)
+        view_menu.addAction(close_split_action)
 
         # Run menu
         run_menu = menubar.addMenu("&Run")
@@ -2392,6 +4567,12 @@ class Pythonico(QtWidgets.QMainWindow):
             del self.filters[index]
         if index in self.completers:
             del self.completers[index]
+        if index in self.splitters:
+            del self.splitters[index]
+        if index in self.split_editors:
+            del self.split_editors[index]
+        if index in self.split_highlighters:
+            del self.split_highlighters[index]
 
         # Reorder the remaining tabs' indices
         for i in range(index, self.tab_widget.count()):
@@ -2399,6 +4580,12 @@ class Pythonico(QtWidgets.QMainWindow):
             self.highlighters[i] = self.highlighters.pop(i + 1)
             self.filters[i] = self.filters.pop(i + 1)
             self.completers[i] = self.completers.pop(i + 1)
+            if i + 1 in self.splitters:
+                self.splitters[i] = self.splitters.pop(i + 1)
+            if i + 1 in self.split_editors:
+                self.split_editors[i] = self.split_editors.pop(i + 1)
+            if i + 1 in self.split_highlighters:
+                self.split_highlighters[i] = self.split_highlighters.pop(i + 1)
 
         if self.tab_widget.count() == 0:
             self.close()
@@ -2428,11 +4615,47 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create an instance of ClaudeAIWidget
         ai_prompt = ClaudeAIWidget()
 
-        # Create a layout for the new tab
+        # Create a layout for the new tab with split view support
         editor_widget = QtWidgets.QWidget()
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
-        editor_layout.addWidget(line_count)
-        editor_layout.addWidget(new_editor)
+        
+        # Create main editor splitter for split view functionality
+        editor_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        
+        # Configure initial splitter properties
+        editor_splitter.setHandleWidth(8)
+        editor_splitter.setChildrenCollapsible(False)
+        editor_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #3b4261;
+                border: 1px solid #565f89;
+                border-radius: 3px;
+            }
+            QSplitter::handle:hover {
+                background-color: #414868;
+                border: 1px solid #7aa2f7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #7aa2f7;
+            }
+        """)
+        
+        # Create primary editor area
+        primary_editor_widget = QtWidgets.QWidget()
+        primary_layout = QtWidgets.QHBoxLayout(primary_editor_widget)
+        primary_layout.setContentsMargins(0, 0, 0, 0)
+        primary_layout.addWidget(line_count)
+        primary_layout.addWidget(new_editor)
+        
+        # Set minimum size for primary editor
+        primary_editor_widget.setMinimumWidth(200)
+        primary_editor_widget.setMinimumHeight(150)
+        
+        # Add primary editor to splitter
+        editor_splitter.addWidget(primary_editor_widget)
+        
+        # Add editor splitter and AI prompt to main layout
+        editor_layout.addWidget(editor_splitter)
         editor_layout.addWidget(ai_prompt)
 
         # Determine the tab name
@@ -2452,12 +4675,15 @@ class Pythonico(QtWidgets.QMainWindow):
 
         # Store unique instances of editor, syntax highlighter, filter, and completer for each tab
         self.editors[tab_index] = new_editor
-        self.highlighters[tab_index] = SyntaxHighlighter(new_editor.document())
+        self.highlighters[tab_index] = AdvancedPythonSyntaxHighlighter(new_editor.document())
         self.filters[tab_index] = AutoIndentFilter(new_editor)
         new_editor.installEventFilter(self.filters[tab_index])
+        
+        # Store the splitter for split view functionality
+        self.splitters[tab_index] = editor_splitter
 
         # Set up a code completer for the new editor
-        completer = CodeAutoCompleter()
+        completer = AdvancedCodeCompleter()
         completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
         completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
         completer.setWrapAround(False)
@@ -2474,7 +4700,7 @@ class Pythonico(QtWidgets.QMainWindow):
         new_editor.setFocus()
         
         # Update Line Count Widget
-        line_count.update_line_count()
+        line_count.update_line_numbers()
         
         # Connect signals to update the status bar
         self.editors[tab_index].cursorPositionChanged.connect(self.update_status_bar)
@@ -2509,6 +4735,7 @@ class Pythonico(QtWidgets.QMainWindow):
         file_dialog = QtWidgets.QFileDialog(self)
         file_dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptMode.AcceptOpen)
         file_dialog.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFiles)  # Allow multiple file selection
+        file_dialog.setNameFilter("Python Files (*.py);;All Files (*.*)")
 
         # Set the default directory to home screen
         file_dialog.setDirectory(home_dir)
@@ -2516,32 +4743,39 @@ class Pythonico(QtWidgets.QMainWindow):
         if file_dialog.exec():
             file_paths = file_dialog.selectedFiles()  # Get the list of selected files
             for file_path in file_paths:
-                file = QtCore.QFile(file_path)
-                if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
-                    text_stream = QtCore.QTextStream(file)
-                    text = text_stream.readAll()
-                    file.close()
+                try:
+                    file = QtCore.QFile(file_path)
+                    if file.open(QtCore.QFile.OpenModeFlag.ReadOnly | QtCore.QFile.OpenModeFlag.Text):
+                        text_stream = QtCore.QTextStream(file)
+                        text = text_stream.readAll()
+                        file.close()
 
-                    # Create a new tab for each file
-                    if self.tab_widget.count() == 1 and self.tab_widget.tabText(0) == "Untitled":
-                        self.tab_widget.removeTab(0)
-                    self.createNewTab(file_path)
-                    current_index = self.tab_widget.currentIndex()
-                    current_editor = self.editors.get(current_index, self.editor)
+                        # Create a new tab for each file
+                        if self.tab_widget.count() == 1 and self.tab_widget.tabText(0) == "Untitled":
+                            self.tab_widget.removeTab(0)
+                        self.createNewTab(file_path)
+                        current_index = self.tab_widget.currentIndex()
+                        current_editor = self.editors.get(current_index, self.editor)
 
-                    # Set the content of the current editor
-                    current_editor.setPlainText(text)
+                        # Set the content of the current editor
+                        current_editor.setPlainText(text)
 
-                    # Update current_file attribute
-                    self.current_file = file_path
-                    # Update window title
-                    self.setWindowTitle(f"Pythonico - {self.current_file}")
+                        # Update current_file attribute
+                        self.current_file = file_path
+                        # Update window title
+                        self.setWindowTitle(f"Pythonico - {self.current_file}")
 
-                    # Update tab name with only the file name
-                    self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
+                        # Update tab name with only the file name
+                        self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
 
-                    # Store the file path in the editor's property
-                    current_editor.setProperty("file_path", file_path)
+                        # Store the file path in the editor's property
+                        current_editor.setProperty("file_path", file_path)
+                        
+                        self.statusBar().showMessage(f"File opened: {file_path}", 2000)
+                    else:
+                        QtWidgets.QMessageBox.critical(self, "Error", f"Could not open file: {file_path}")
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(self, "Error", f"Error opening file {file_path}: {str(e)}")
 
     def save_file(self):
         current_index = self.tab_widget.currentIndex()
@@ -2551,27 +4785,11 @@ class Pythonico(QtWidgets.QMainWindow):
         if not file_path:
             # No current file is set, prompt the user
             home_dir = QtCore.QDir.homePath()
-            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", home_dir)
+            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", home_dir, "Python Files (*.py);;All Files (*.*)")
             if not file_path:
                 return
 
-        file = QtCore.QFile(file_path)
-        if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
-            text_stream = QtCore.QTextStream(file)
-            text_stream << current_editor.toPlainText()
-            file.close()
-            self.current_file = file_path
-            self.setWindowTitle(f"Pythonico - {self.current_file}")
-            self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
-            current_editor.setProperty("file_path", file_path)
-
-    def save_as_file(self):
-        current_index = self.tab_widget.currentIndex()
-        current_editor = self.editors.get(current_index, self.editor) or self.editor
-
-        home_dir = QtCore.QDir.homePath()
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File As", home_dir)
-        if file_path:
+        try:
             file = QtCore.QFile(file_path)
             if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
                 text_stream = QtCore.QTextStream(file)
@@ -2581,6 +4799,34 @@ class Pythonico(QtWidgets.QMainWindow):
                 self.setWindowTitle(f"Pythonico - {self.current_file}")
                 self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
                 current_editor.setProperty("file_path", file_path)
+                self.statusBar().showMessage(f"File saved: {file_path}", 2000)
+            else:
+                QtWidgets.QMessageBox.critical(self, "Error", f"Could not save file: {file_path}")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", f"Error saving file: {str(e)}")
+
+    def save_as_file(self):
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editors.get(current_index, self.editor) or self.editor
+
+        home_dir = QtCore.QDir.homePath()
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File As", home_dir, "Python Files (*.py);;All Files (*.*)")
+        if file_path:
+            try:
+                file = QtCore.QFile(file_path)
+                if file.open(QtCore.QFile.OpenModeFlag.WriteOnly | QtCore.QFile.OpenModeFlag.Text):
+                    text_stream = QtCore.QTextStream(file)
+                    text_stream << current_editor.toPlainText()
+                    file.close()
+                    self.current_file = file_path
+                    self.setWindowTitle(f"Pythonico - {self.current_file}")
+                    self.tab_widget.setTabText(current_index, QtCore.QFileInfo(file_path).fileName())
+                    current_editor.setProperty("file_path", file_path)
+                    self.statusBar().showMessage(f"File saved as: {file_path}", 2000)
+                else:
+                    QtWidgets.QMessageBox.critical(self, "Error", f"Could not save file: {file_path}")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Error", f"Error saving file: {str(e)}")
 
     def onTextChanged(self):
         # Add an asterisk (*) to the current editor title to indicate unsaved changes
@@ -2624,6 +4870,14 @@ class Pythonico(QtWidgets.QMainWindow):
                 # Terminal is hidden, show it
                 main_splitter.setSizes([int(main_splitter.size().height() * 0.7), 
                                        int(main_splitter.size().height() * 0.3)])
+
+    def toggleProjectExplorer(self):
+        """Toggle the visibility of the project explorer dock widget"""
+        if self.project_explorer.isVisible():
+            self.project_explorer.hide()
+        else:
+            self.project_explorer.show()
+            
     def debugProgram(self):
         try:
             # Get the current editor and its content
@@ -2637,13 +4891,42 @@ class Pythonico(QtWidgets.QMainWindow):
                     "The editor is empty. Please type some Python code to debug!")
                 return
             
-            # Create debugger window if it doesn't exist
-            if not hasattr(self, 'debug_window'):
-                self.debug_window = debugger()
+            # Create debugger window if it doesn't exist, with proper error handling
+            if not hasattr(self, 'debug_window') or self.debug_window is None:
+                try:
+                    # Ensure we're in the main thread for Qt widget creation
+                    app_instance = QtWidgets.QApplication.instance()
+                    if app_instance is None:
+                        QtWidgets.QMessageBox.warning(self, 
+                            "Application Error", 
+                            "No QApplication instance found!")
+                        return
+                    
+                    if QtCore.QThread.currentThread() != app_instance.thread():
+                        QtWidgets.QMessageBox.warning(self, 
+                            "Threading Error", 
+                            "Debugger must be created in the main thread!")
+                        return
+                    
+                    # Create advanced debugger with proper threading safety
+                    self.debug_window = AdvancedDebugger(self)
+                    self.debug_window.set_current_editor(current_editor)
+                    
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(self, 
+                        "Debugger Error", 
+                        f"Failed to create debugger window: {str(e)}")
+                    return
             else:
                 # Reset any previous debugging state
-                if self.debug_window.debugger_active:
-                    self.debug_window.debug_stop()
+                try:
+                    if hasattr(self.debug_window, 'debugger_active') and self.debug_window.debugger_active:
+                        self.debug_window.debug_stop()
+                    self.debug_window.set_current_editor(current_editor)
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(self, 
+                        "Debugger Reset Error", 
+                        f"Failed to reset debugger: {str(e)}")
             
             # Get file path from the editor or create a temporary file
             file_path = current_editor.property("file_path")
@@ -2657,51 +4940,24 @@ class Pythonico(QtWidgets.QMainWindow):
                 with open(file_path, 'w') as f:
                     f.write(content)
             
-            # Set the current editor in the debugger
-            self.debug_window.current_editor = current_editor
+            # Set up the debugger with the current code
+            self.debug_window.load_file(file_path, content)
             
-            # Show the debugger window
-            self.debug_window.show()
-            self.debug_window.raise_()
-            
-            # Clear previous output
-            self.debug_window.debug_output.clear()
-            
-            # Add header
-            self.debug_window.append_output("<b>Starting debug session...</b>")
-            self.debug_window.append_output(f"<i>Using file: {file_path}</i>")
-            
-            # Initialize the PDB command queue if not exists
-            if not hasattr(self.debug_window, 'pdb_command_queue'):
-                self.debug_window.pdb_command_queue = queue.Queue()
-                
-            # Create a custom Pdb instance and prepare for debugging
-            self.debug_window.current_file = file_path
-            self.debug_window.script_file = file_path
-            self.debug_window.code_to_debug = content
-            
-            # Update the code view in the debugger
-            self.debug_window.code_view.setPlainText(content)
-            
-            # Enable debug controls
-            self.debug_window.run_button.setEnabled(True)
-            self.debug_window.step_into_button.setEnabled(True)
-            self.debug_window.step_over_button.setEnabled(True)
-            self.debug_window.step_out_button.setEnabled(True)
-            self.debug_window.continue_button.setEnabled(True)
-            
-            # Start the debugger
-            self.debug_window.debug_run()
+            # Show the debugger window with error handling
+            try:
+                self.debug_window.show()
+                self.debug_window.raise_()
+                self.debug_window.activateWindow()
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, 
+                    "Display Error", 
+                    f"Failed to show debugger window: {str(e)}")
+                return
             
         except Exception as e:
             QtWidgets.QMessageBox.critical(self,
                 "Debug Error",
                 f"An error occurred while debugging: {str(e)}\n{traceback.format_exc()}")
-            
-            if hasattr(self, 'debug_window'):
-                self.debug_window.append_output("<b>Exception setting up debugger:</b>")
-                self.debug_window.append_output(f"<pre style='color: red;'>{traceback.format_exc()}</pre>")
-                self.debug_window.status_bar.showMessage("Error starting debugger")
 
     def runProgram(self):
         try:
@@ -2752,6 +5008,107 @@ class Pythonico(QtWidgets.QMainWindow):
 
         layout.addLayout(options_layout)
         dialog.exec()
+
+    def show_find_dialog(self):
+        """Show the Find/Replace dialog"""
+        if not hasattr(self, 'find_dialog') or not self.find_dialog:
+            self.find_dialog = FindReplaceDialog(self)
+        
+        self.find_dialog.show()
+        self.find_dialog.raise_()
+        self.find_dialog.activateWindow()
+        self.find_dialog.find_edit.setFocus()
+
+    def find_text_in_dialog(self, search_text, reverse=False, case_sensitive=False, whole_words=False, regex=False):
+        """Enhanced find method for the Find/Replace dialog"""
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editors.get(current_index, self.editor)
+        if not current_editor or not search_text:
+            return False
+            
+        flags = 0 if case_sensitive else re.IGNORECASE
+        if not regex:
+            search_text = re.escape(search_text)
+        if whole_words:
+            search_text = r'\b' + search_text + r'\b'
+            
+        cursor = current_editor.textCursor()
+        start_pos = cursor.selectionEnd() if cursor.hasSelection() else cursor.position()
+        text = current_editor.toPlainText()
+        
+        try:
+            pattern = re.compile(search_text, flags | re.MULTILINE)
+            
+            if reverse:
+                matches = list(pattern.finditer(text))
+                matches = [m for m in matches if m.end() <= start_pos]
+                match = matches[-1] if matches else None
+            else:
+                match = pattern.search(text, start_pos)
+                
+            if match:
+                cursor.setPosition(match.start())
+                cursor.setPosition(match.end(), QtGui.QTextCursor.MoveMode.KeepAnchor)
+                current_editor.setTextCursor(cursor)
+                current_editor.ensureCursorVisible()
+                return True
+            else:
+                # Wrap around search
+                if reverse:
+                    matches = list(pattern.finditer(text))
+                    match = matches[-1] if matches else None
+                else:
+                    match = pattern.search(text, 0)
+                    
+                if match:
+                    cursor.setPosition(match.start())
+                    cursor.setPosition(match.end(), QtGui.QTextCursor.MoveMode.KeepAnchor)
+                    current_editor.setTextCursor(cursor)
+                    current_editor.ensureCursorVisible()
+                    return True
+                    
+        except re.error as e:
+            QtWidgets.QMessageBox.warning(self, "Regex Error", f"Invalid regular expression: {e}")
+            
+        return False
+
+    def replace_current_selection(self, replace_text):
+        """Replace the currently selected text"""
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editors.get(current_index, self.editor)
+        if not current_editor:
+            return
+            
+        cursor = current_editor.textCursor()
+        if cursor.hasSelection():
+            cursor.insertText(replace_text)
+
+    def replace_all_text(self, find_text, replace_text, case_sensitive=False, whole_words=False, regex=False):
+        """Replace all occurrences of find_text with replace_text"""
+        current_index = self.tab_widget.currentIndex()
+        current_editor = self.editors.get(current_index, self.editor)
+        if not current_editor or not find_text:
+            return 0
+            
+        flags = 0 if case_sensitive else re.IGNORECASE
+        if not regex:
+            find_text = re.escape(find_text)
+        if whole_words:
+            find_text = r'\b' + find_text + r'\b'
+            
+        try:
+            pattern = re.compile(find_text, flags | re.MULTILINE)
+            text = current_editor.toPlainText()
+            new_text, count = pattern.subn(replace_text, text)
+            
+            if count > 0:
+                current_editor.setPlainText(new_text)
+                
+            return count
+            
+        except re.error as e:
+            QtWidgets.QMessageBox.warning(self, "Regex Error", f"Invalid regular expression: {e}")
+            return 0
 
     def find_text(self, search_text, editor, reverse=False):
         flags = re.MULTILINE
@@ -2899,15 +5256,171 @@ class Pythonico(QtWidgets.QMainWindow):
                 if claude_ai_widget:
                     claude_ai_widget.output_window.setStyleSheet(f"background-color: {background_color}; color: {font_color};")
             
+    def split_horizontal(self):
+        """Split the current editor horizontally"""
+        current_index = self.tab_widget.currentIndex()
+        if current_index >= 0:
+            splitter = self.splitters.get(current_index)
+            if splitter and splitter.count() == 1:
+                self._create_split_editor(current_index, QtCore.Qt.Orientation.Vertical)
+    
+    def split_vertical(self):
+        """Split the current editor vertically"""
+        current_index = self.tab_widget.currentIndex()
+        if current_index >= 0:
+            splitter = self.splitters.get(current_index)
+            if splitter and splitter.count() == 1:
+                self._create_split_editor(current_index, QtCore.Qt.Orientation.Horizontal)
+    
+    def close_split(self):
+        """Close the split view and return to single editor"""
+        current_index = self.tab_widget.currentIndex()
+        if current_index >= 0:
+            splitter = self.splitters.get(current_index)
+            if splitter and splitter.count() > 1:
+                # Clean up split editor references
+                if current_index in self.split_editors:
+                    del self.split_editors[current_index]
+                if current_index in self.split_highlighters:
+                    del self.split_highlighters[current_index]
+                
+                # Remove the second editor
+                while splitter.count() > 1:
+                    widget = splitter.widget(1)
+                    splitter.widget(1).setParent(None)
+                    widget.deleteLater()
+    
+    def _create_split_editor(self, tab_index, orientation):
+        """Create a split editor with the specified orientation"""
+        current_editor = self.editors.get(tab_index)
+        if not current_editor:
+            return
+        
+        splitter = self.splitters.get(tab_index)
+        if not splitter:
+            return
+        
+        # Create a new editor for the split
+        split_editor = QtWidgets.QPlainTextEdit()
+        split_editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        split_editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        
+        # Copy settings from current editor
+        split_editor.setStyleSheet(current_editor.styleSheet())
+        split_editor.setFont(current_editor.font())
+        
+        # Set the same content
+        split_editor.setPlainText(current_editor.toPlainText())
+        
+        # Create line count widget for split editor
+        split_line_count = LineCountWidget(split_editor)
+        
+        # Create widget to hold split editor and line count
+        split_widget = QtWidgets.QWidget()
+        split_layout = QtWidgets.QHBoxLayout(split_widget)
+        split_layout.setContentsMargins(0, 0, 0, 0)
+        split_layout.addWidget(split_line_count)
+        split_layout.addWidget(split_editor)
+        
+        # Set orientation and add to splitter
+        splitter.setOrientation(orientation)
+        splitter.addWidget(split_widget)
+        
+        # Set up syntax highlighting for split editor
+        split_highlighter = AdvancedPythonSyntaxHighlighter(split_editor.document())
+        
+        # Store split editor and highlighter references
+        self.split_editors[tab_index] = split_editor
+        self.split_highlighters[tab_index] = split_highlighter
+        
+        # Set up auto-completion for split editor
+        split_filter = AutoIndentFilter(split_editor)
+        split_editor.installEventFilter(split_filter)
+        
+        split_completer = AdvancedCodeCompleter()
+        split_completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
+        split_completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        split_completer.setWrapAround(False)
+        split_completer.setWidget(split_editor)
+        split_editor.textChanged.connect(lambda: self.update_completer_for_editor(split_editor, split_completer))
+        
+        # Sync content between main and split editor
+        def sync_to_split():
+            try:
+                if split_editor is not None and not split_editor.hasFocus():
+                    split_editor.setPlainText(current_editor.toPlainText())
+            except RuntimeError:
+                # Widget has been deleted, disconnect signal
+                current_editor.textChanged.disconnect(sync_to_split)
+        
+        def sync_to_main():
+            try:
+                if current_editor is not None and not current_editor.hasFocus():
+                    current_editor.setPlainText(split_editor.toPlainText())
+            except RuntimeError:
+                # Widget has been deleted, disconnect signal
+                split_editor.textChanged.disconnect(sync_to_main)
+        
+        current_editor.textChanged.connect(sync_to_split)
+        split_editor.textChanged.connect(sync_to_main)
+        
+        # Update line count for split editor
+        split_line_count.update_line_numbers()
+        
+        # Enhanced splitter configuration for better resizing
+        splitter.setHandleWidth(8)  # Wider handle for easier resizing
+        splitter.setChildrenCollapsible(False)  # Prevent panes from collapsing completely
+        
+        # Set custom splitter handle style
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #3b4261;
+                border: 1px solid #565f89;
+                border-radius: 3px;
+            }
+            QSplitter::handle:hover {
+                background-color: #414868;
+                border: 1px solid #7aa2f7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #7aa2f7;
+            }
+            QSplitter::handle:horizontal {
+                width: 8px;
+                image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==);
+            }
+            QSplitter::handle:vertical {
+                height: 8px;
+                image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==);
+            }
+        """)
+        
+        # Set equal sizes for split panes with minimum size constraints
+        total_width = splitter.width() if splitter.width() > 0 else 800
+        splitter.setSizes([total_width // 2, total_width // 2])
+        
+        # Set minimum sizes to prevent panes from becoming too small
+        for i in range(splitter.count()):
+            widget = splitter.widget(i)
+            if widget:
+                widget.setMinimumWidth(200)  # Minimum width for each pane
+                widget.setMinimumHeight(150)  # Minimum height for each pane
+
     def apply_font_to_all_editors(self):
         font, ok = QtWidgets.QFontDialog.getFont()
         if ok:
             # Apply font to the first editor
             self.editor.setFont(font)
             
-            # Apply font to all other editors
+            # Apply font to all tab editors
             for editor in self.editors.values():
-                editor.setFont(font)
+                if editor:
+                    editor.setFont(font)
+            
+            # Apply font to all split editors
+            for split_editor in self.split_editors.values():
+                if split_editor:
+                    split_editor.setFont(font)
                 
             # Change font for all LineCountWidgets
             for line_count_widget in self.findChildren(LineCountWidget):
@@ -3151,8 +5664,46 @@ class Pythonico(QtWidgets.QMainWindow):
             file_path = self.tab_widget.tabText(current_index) or "Untitled"
             self.file_label.setText(f"File: {os.path.basename(file_path)}")
 
-if __name__ == "__main__":
+    def cleanup_threads(self):
+        """Clean up all running threads before application exit"""
+        try:
+            # Cleanup Claude AI worker threads
+            for claude_widget in [self.claude_ai_widget] if hasattr(self, 'claude_ai_widget') else []:
+                if hasattr(claude_widget, 'worker') and claude_widget.worker:
+                    if claude_widget.worker.isRunning():
+                        claude_widget.worker.quit()
+                        if not claude_widget.worker.wait(2000):
+                            claude_widget.worker.terminate()
+                            claude_widget.worker.wait(1000)
+            
+            # Cleanup debug processes
+            if hasattr(self, 'debug_window') and self.debug_window:
+                if self.debug_window.debug_server and self.debug_window.debug_server.debug_process:
+                    debug_process = self.debug_window.debug_server.debug_process
+                    if debug_process.state() == QtCore.QProcess.ProcessState.Running:
+                        debug_process.terminate()
+                        if not debug_process.waitForFinished(2000):
+                            debug_process.kill()
+            
+        except Exception as e:
+            print(f"Error during thread cleanup: {e}")
+
+    def closeEvent(self, event):
+        """Handle application close event"""
+        self.cleanup_threads()
+        event.accept()
+
+def main():
     app = QtWidgets.QApplication(sys.argv)
     editor = Pythonico()
     editor.show()
+    
+    # Handle application exit gracefully
+    def cleanup():
+        editor.cleanup_threads()
+    
+    app.aboutToQuit.connect(cleanup)
     sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
