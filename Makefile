@@ -447,16 +447,18 @@ endif
 ##@ Cleaning Targets
 
 .PHONY: clean
-clean: clean-build clean-cache clean-temp ## Clean all generated files
+clean: clean-build clean-cache clean-temp clean-venv ## Clean all generated files including venv
 
 .PHONY: clean-build
 clean-build: ## Clean build artifacts
 	$(call print_status,Cleaning build artifacts...)
 	@if [ "$(OS)" = "windows" ]; then \
 		cmd /c "if exist \"$(BUILD_DIR)\" rmdir /s /q \"$(BUILD_DIR)\" 2>nul"; \
+		cmd /c "if exist \"build\" rmdir /s /q \"build\" 2>nul"; \
 		cmd /c "if exist \"$(DIST_DIR)\" rmdir /s /q \"$(DIST_DIR)\" 2>nul"; \
 	else \
 		rm -rf $(BUILD_DIR); \
+		rm -rf build; \
 		rm -rf $(DIST_DIR); \
 	fi
 
