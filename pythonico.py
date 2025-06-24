@@ -3951,6 +3951,10 @@ class AdvancedCodeCompleter(QtWidgets.QCompleter):
     def setup_advanced_popup(self):
         """Configure the popup with Tokyo Night styling and custom rendering"""
         popup = self.popup()
+        
+        # Set proper window flags for Wayland compatibility
+        popup.setWindowFlags(QtCore.Qt.WindowType.Popup | QtCore.Qt.WindowType.FramelessWindowHint)
+        
         popup.setStyleSheet("""
             QListView {
                 background-color: #1a1b26;
@@ -4692,10 +4696,17 @@ class AboutDialog(QtWidgets.QDialog):
         self.setMaximumSize(self.size())
 
         image_label = QtWidgets.QLabel()
-        pixmap = QtGui.QPixmap("icons/main.png").scaledToWidth(200)
-        image_label.setPixmap(pixmap)
-        image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(image_label)
+        
+        # Load pixmap with error checking to prevent null pixmap error
+        pixmap = QtGui.QPixmap("icons/main.png")
+        if not pixmap.isNull():
+            pixmap = pixmap.scaledToWidth(200)
+            image_label.setPixmap(pixmap)
+            image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(image_label)
+        else:
+            # If icon doesn't exist, just skip the image
+            pass
 
         about_text = """
             <h1><center>Pythonico</center></h1>
@@ -5340,6 +5351,12 @@ class Pythonico(QtWidgets.QMainWindow):
         completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
         completer.setWrapAround(False)
         completer.setWidget(new_editor)
+        
+        # Set transient parent for Wayland compatibility
+        popup = completer.popup()
+        if popup and hasattr(popup, 'setParent'):
+            popup.setParent(new_editor.window(), QtCore.Qt.WindowType.Popup)
+        
         new_editor.textChanged.connect(lambda: self.update_completer_for_editor(new_editor, completer))
 
         # Store the completer for the new tab
@@ -5994,6 +6011,12 @@ class Pythonico(QtWidgets.QMainWindow):
         split_completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
         split_completer.setWrapAround(False)
         split_completer.setWidget(split_editor)
+        
+        # Set transient parent for Wayland compatibility
+        split_popup = split_completer.popup()
+        if split_popup and hasattr(split_popup, 'setParent'):
+            split_popup.setParent(split_editor.window(), QtCore.Qt.WindowType.Popup)
+        
         split_editor.textChanged.connect(lambda: self.update_completer_for_editor(split_editor, split_completer))
         
         # Sync content between main and split editor
