@@ -6,6 +6,604 @@ import os, sys, traceback, markdown, pyaudio, keyword, re, webbrowser, json, pkg
 from PyQt6 import QtCore, QtGui, QtWidgets
 from pyqtconsole.console import PythonConsole
 
+class SettingsManager:
+    def __init__(self):
+        self.config_dir = os.path.expanduser("~/.pythonico")
+        self.config_file = os.path.join(self.config_dir, "settings.json")
+        self.observers = []
+        self.settings = self.load_settings()
+        
+    def load_settings(self):
+        defaults = {
+            "general": {
+                "theme": "Tokyo Night Day",
+                "auto_save": True,
+                "auto_save_interval": 30,
+                "restore_tabs": True,
+                "confirm_exit": True,
+                "startup_behavior": "restore_session"
+            },
+            "editor": {
+                "font_family": "Monospace",
+                "font_size": 11,
+                "theme": "Tokyo Night Day",
+                "line_numbers": True,
+                "word_wrap": False,
+                "indent_size": 4,
+                "auto_indent": True,
+                "highlight_current_line": True,
+                "show_whitespace": False,
+                "bracket_matching": True,
+                "auto_completion": True,
+                "minimap": False
+            },
+            "assistant": {
+                "font_family": "Monospace",
+                "font_size": 11,
+                "theme": "Solarized Light",
+                "api_key": "YOUR-CLAUDE-API",
+                "model": "claude-3-7-sonnet-20250219",
+                "temperature": 0.7,
+                "max_tokens": 4096,
+                "default_language": "English (en-US)",
+                "auto_scroll": True,
+                "markdown_rendering": True
+            },
+            "terminal": {
+                "font_family": "Monospace",
+                "font_size": 11,
+                "theme": "Dark",
+                "startup_command": "",
+                "history_size": 1000,
+                "auto_complete": True
+            },
+            "interface": {
+                "show_project_explorer": True,
+                "show_assistant": True,
+                "show_terminal": True,
+                "toolbar_visible": True,
+                "status_bar_visible": True,
+                "panel_layout": "vertical",
+                "window_geometry": None,
+                "window_state": None
+            },
+            "shortcuts": {
+                "new_file": "Ctrl+N",
+                "open_file": "Ctrl+O",
+                "save_file": "Ctrl+S",
+                "save_as": "Ctrl+Shift+S",
+                "close_tab": "Ctrl+W",
+                "quit": "Ctrl+Q",
+                "toggle_project_explorer": "Ctrl+E",
+                "toggle_assistant": "Ctrl+I",
+                "toggle_terminal": "Ctrl+T",
+                "run_program": "Ctrl+R",
+                "debug_program": "Ctrl+D",
+                "find": "Ctrl+F",
+                "replace": "Ctrl+H",
+                "goto_line": "Ctrl+G"
+            },
+            "advanced": {
+                "debug_mode": False,
+                "performance_mode": False,
+                "memory_limit": 512,
+                "plugin_directory": "",
+                "backup_directory": "",
+                "backup_count": 10,
+                "check_updates": True,
+                "telemetry": False
+            }
+        }
+        
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    loaded_settings = json.load(f)
+                    defaults.update(loaded_settings)
+            except Exception as e:
+                print(f"Error loading settings: {e}")
+        
+        return defaults
+    
+    def save_settings(self):
+        try:
+            os.makedirs(self.config_dir, exist_ok=True)
+            with open(self.config_file, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+            self.notify_observers()
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+    
+    def get(self, category, key, default=None):
+        return self.settings.get(category, {}).get(key, default)
+    
+    def set(self, category, key, value):
+        if category not in self.settings:
+            self.settings[category] = {}
+        self.settings[category][key] = value
+        self.save_settings()
+    
+    def get_category(self, category):
+        return self.settings.get(category, {})
+    
+    def set_category(self, category, values):
+        self.settings[category] = values
+        self.save_settings()
+    
+    def add_observer(self, callback):
+        self.observers.append(callback)
+    
+    def remove_observer(self, callback):
+        if callback in self.observers:
+            self.observers.remove(callback)
+    
+    def notify_observers(self):
+        for callback in self.observers:
+            callback(self.settings)
+
+class SettingsDialog(QtWidgets.QDialog):
+    def __init__(self, settings_manager, parent=None):
+        super().__init__(parent)
+        self.settings_manager = settings_manager
+        self.temp_settings = json.loads(json.dumps(settings_manager.settings))
+        self.setup_ui()
+        
+    def setup_ui(self):
+        self.setWindowTitle("Settings")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        
+        # Create tab widget
+        self.tab_widget = QtWidgets.QTabWidget()
+        layout.addWidget(self.tab_widget)
+        
+        # Create tabs
+        self.create_general_tab()
+        self.create_editor_tab()
+        self.create_assistant_tab()
+        self.create_terminal_tab()
+        self.create_interface_tab()
+        self.create_shortcuts_tab()
+        self.create_advanced_tab()
+        
+        # Button box
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok |
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel |
+            QtWidgets.QDialogButtonBox.StandardButton.Apply |
+            QtWidgets.QDialogButtonBox.StandardButton.RestoreDefaults
+        )
+        
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        button_box.button(QtWidgets.QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply_settings)
+        button_box.button(QtWidgets.QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(self.restore_defaults)
+        
+        layout.addWidget(button_box)
+    
+    def create_general_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(tab)
+        
+        # Theme selection
+        self.general_theme = QtWidgets.QComboBox()
+        self.general_theme.addItems(["Tokyo Night Day", "Tokyo Night Storm", "Solarized Light", "Solarized Dark", "Dark", "Light"])
+        self.general_theme.setCurrentText(self.temp_settings["general"]["theme"])
+        layout.addRow("Application Theme:", self.general_theme)
+        
+        # Auto-save
+        self.auto_save = QtWidgets.QCheckBox("Enable auto-save")
+        self.auto_save.setChecked(self.temp_settings["general"]["auto_save"])
+        layout.addRow(self.auto_save)
+        
+        # Auto-save interval
+        self.auto_save_interval = QtWidgets.QSpinBox()
+        self.auto_save_interval.setRange(5, 300)
+        self.auto_save_interval.setSuffix(" seconds")
+        self.auto_save_interval.setValue(self.temp_settings["general"]["auto_save_interval"])
+        layout.addRow("Auto-save interval:", self.auto_save_interval)
+        
+        # Restore tabs
+        self.restore_tabs = QtWidgets.QCheckBox("Restore tabs on startup")
+        self.restore_tabs.setChecked(self.temp_settings["general"]["restore_tabs"])
+        layout.addRow(self.restore_tabs)
+        
+        # Confirm exit
+        self.confirm_exit = QtWidgets.QCheckBox("Confirm before exit")
+        self.confirm_exit.setChecked(self.temp_settings["general"]["confirm_exit"])
+        layout.addRow(self.confirm_exit)
+        
+        # Startup behavior
+        self.startup_behavior = QtWidgets.QComboBox()
+        self.startup_behavior.addItems(["new_file", "restore_session", "open_dialog"])
+        self.startup_behavior.setCurrentText(self.temp_settings["general"]["startup_behavior"])
+        layout.addRow("Startup behavior:", self.startup_behavior)
+        
+        self.tab_widget.addTab(tab, "General")
+    
+    def create_editor_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(tab)
+        
+        # Font settings
+        font_layout = QtWidgets.QHBoxLayout()
+        self.editor_font_family = QtWidgets.QFontComboBox()
+        self.editor_font_family.setCurrentText(self.temp_settings["editor"]["font_family"])
+        self.editor_font_size = QtWidgets.QSpinBox()
+        self.editor_font_size.setRange(8, 72)
+        self.editor_font_size.setValue(self.temp_settings["editor"]["font_size"])
+        font_layout.addWidget(self.editor_font_family)
+        font_layout.addWidget(self.editor_font_size)
+        layout.addRow("Font:", font_layout)
+        
+        # Theme
+        self.editor_theme = QtWidgets.QComboBox()
+        self.editor_theme.addItems(["Tokyo Night Day", "Tokyo Night Storm", "Solarized Light", "Solarized Dark", "Dark", "Light"])
+        self.editor_theme.setCurrentText(self.temp_settings["editor"]["theme"])
+        layout.addRow("Editor Theme:", self.editor_theme)
+        
+        # Line numbers
+        self.line_numbers = QtWidgets.QCheckBox("Show line numbers")
+        self.line_numbers.setChecked(self.temp_settings["editor"]["line_numbers"])
+        layout.addRow(self.line_numbers)
+        
+        # Word wrap
+        self.word_wrap = QtWidgets.QCheckBox("Enable word wrap")
+        self.word_wrap.setChecked(self.temp_settings["editor"]["word_wrap"])
+        layout.addRow(self.word_wrap)
+        
+        # Indent size
+        self.indent_size = QtWidgets.QSpinBox()
+        self.indent_size.setRange(1, 8)
+        self.indent_size.setValue(self.temp_settings["editor"]["indent_size"])
+        layout.addRow("Indent size:", self.indent_size)
+        
+        # Auto indent
+        self.auto_indent = QtWidgets.QCheckBox("Auto indent")
+        self.auto_indent.setChecked(self.temp_settings["editor"]["auto_indent"])
+        layout.addRow(self.auto_indent)
+        
+        # Highlight current line
+        self.highlight_current_line = QtWidgets.QCheckBox("Highlight current line")
+        self.highlight_current_line.setChecked(self.temp_settings["editor"]["highlight_current_line"])
+        layout.addRow(self.highlight_current_line)
+        
+        # Show whitespace
+        self.show_whitespace = QtWidgets.QCheckBox("Show whitespace characters")
+        self.show_whitespace.setChecked(self.temp_settings["editor"]["show_whitespace"])
+        layout.addRow(self.show_whitespace)
+        
+        # Bracket matching
+        self.bracket_matching = QtWidgets.QCheckBox("Enable bracket matching")
+        self.bracket_matching.setChecked(self.temp_settings["editor"]["bracket_matching"])
+        layout.addRow(self.bracket_matching)
+        
+        # Auto completion
+        self.auto_completion = QtWidgets.QCheckBox("Enable auto completion")
+        self.auto_completion.setChecked(self.temp_settings["editor"]["auto_completion"])
+        layout.addRow(self.auto_completion)
+        
+        # Minimap
+        self.minimap = QtWidgets.QCheckBox("Show minimap")
+        self.minimap.setChecked(self.temp_settings["editor"]["minimap"])
+        layout.addRow(self.minimap)
+        
+        self.tab_widget.addTab(tab, "Editor")
+    
+    def create_assistant_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(tab)
+        
+        # Font settings
+        font_layout = QtWidgets.QHBoxLayout()
+        self.assistant_font_family = QtWidgets.QFontComboBox()
+        self.assistant_font_family.setCurrentText(self.temp_settings["assistant"]["font_family"])
+        self.assistant_font_size = QtWidgets.QSpinBox()
+        self.assistant_font_size.setRange(8, 72)
+        self.assistant_font_size.setValue(self.temp_settings["assistant"]["font_size"])
+        font_layout.addWidget(self.assistant_font_family)
+        font_layout.addWidget(self.assistant_font_size)
+        layout.addRow("Font:", font_layout)
+        
+        # Theme
+        self.assistant_theme = QtWidgets.QComboBox()
+        self.assistant_theme.addItems(["Tokyo Night Day", "Tokyo Night Storm", "Solarized Light", "Solarized Dark", "Dark", "Light"])
+        self.assistant_theme.setCurrentText(self.temp_settings["assistant"]["theme"])
+        layout.addRow("Assistant Theme:", self.assistant_theme)
+        
+        # API Key
+        self.api_key = QtWidgets.QLineEdit()
+        self.api_key.setText(self.temp_settings["assistant"]["api_key"])
+        self.api_key.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        layout.addRow("API Key:", self.api_key)
+        
+        # Model
+        self.model = QtWidgets.QComboBox()
+        self.model.addItems(["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"])
+        self.model.setCurrentText(self.temp_settings["assistant"]["model"])
+        layout.addRow("Model:", self.model)
+        
+        # Temperature
+        self.temperature = QtWidgets.QDoubleSpinBox()
+        self.temperature.setRange(0.0, 2.0)
+        self.temperature.setSingleStep(0.1)
+        self.temperature.setValue(self.temp_settings["assistant"]["temperature"])
+        layout.addRow("Temperature:", self.temperature)
+        
+        # Max tokens
+        self.max_tokens = QtWidgets.QSpinBox()
+        self.max_tokens.setRange(1, 8192)
+        self.max_tokens.setValue(self.temp_settings["assistant"]["max_tokens"])
+        layout.addRow("Max Tokens:", self.max_tokens)
+        
+        # Default language
+        self.default_language = QtWidgets.QComboBox()
+        self.default_language.addItems([
+            "English (en-US)", "English (en-GB)", "Arabic (ar-SA)", "Chinese (zh-CN)",
+            "Danish (da-DK)", "Dutch (nl-NL)", "Finnish (fi-FI)", "French (fr-FR)",
+            "German (de-DE)", "Italian (it-IT)", "Japanese (ja-JP)", "Korean (ko-KR)",
+            "Norwegian (nb-NO)", "Portuguese (pt-BR)", "Portuguese (pt-PT)",
+            "Spanish (es-ES)", "Swedish (sv-SE)", "Ukrainian (uk-UA)"
+        ])
+        self.default_language.setCurrentText(self.temp_settings["assistant"]["default_language"])
+        layout.addRow("Default Language:", self.default_language)
+        
+        # Auto scroll
+        self.auto_scroll = QtWidgets.QCheckBox("Auto scroll to bottom")
+        self.auto_scroll.setChecked(self.temp_settings["assistant"]["auto_scroll"])
+        layout.addRow(self.auto_scroll)
+        
+        # Markdown rendering
+        self.markdown_rendering = QtWidgets.QCheckBox("Enable markdown rendering")
+        self.markdown_rendering.setChecked(self.temp_settings["assistant"]["markdown_rendering"])
+        layout.addRow(self.markdown_rendering)
+        
+        self.tab_widget.addTab(tab, "Assistant")
+    
+    def create_terminal_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(tab)
+        
+        # Font settings
+        font_layout = QtWidgets.QHBoxLayout()
+        self.terminal_font_family = QtWidgets.QFontComboBox()
+        self.terminal_font_family.setCurrentText(self.temp_settings["terminal"]["font_family"])
+        self.terminal_font_size = QtWidgets.QSpinBox()
+        self.terminal_font_size.setRange(8, 72)
+        self.terminal_font_size.setValue(self.temp_settings["terminal"]["font_size"])
+        font_layout.addWidget(self.terminal_font_family)
+        font_layout.addWidget(self.terminal_font_size)
+        layout.addRow("Font:", font_layout)
+        
+        # Theme
+        self.terminal_theme = QtWidgets.QComboBox()
+        self.terminal_theme.addItems(["Dark", "Light", "Tokyo Night Day", "Tokyo Night Storm", "Solarized Light", "Solarized Dark"])
+        self.terminal_theme.setCurrentText(self.temp_settings["terminal"]["theme"])
+        layout.addRow("Terminal Theme:", self.terminal_theme)
+        
+        # Startup command
+        self.startup_command = QtWidgets.QLineEdit()
+        self.startup_command.setText(self.temp_settings["terminal"]["startup_command"])
+        layout.addRow("Startup Command:", self.startup_command)
+        
+        # History size
+        self.history_size = QtWidgets.QSpinBox()
+        self.history_size.setRange(100, 10000)
+        self.history_size.setValue(self.temp_settings["terminal"]["history_size"])
+        layout.addRow("History Size:", self.history_size)
+        
+        # Auto complete
+        self.terminal_auto_complete = QtWidgets.QCheckBox("Enable auto completion")
+        self.terminal_auto_complete.setChecked(self.temp_settings["terminal"]["auto_complete"])
+        layout.addRow(self.terminal_auto_complete)
+        
+        self.tab_widget.addTab(tab, "Terminal")
+    
+    def create_interface_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(tab)
+        
+        # Panel visibility
+        self.show_project_explorer = QtWidgets.QCheckBox("Show Project Explorer")
+        self.show_project_explorer.setChecked(self.temp_settings["interface"]["show_project_explorer"])
+        layout.addRow(self.show_project_explorer)
+        
+        self.show_assistant = QtWidgets.QCheckBox("Show Assistant Panel")
+        self.show_assistant.setChecked(self.temp_settings["interface"]["show_assistant"])
+        layout.addRow(self.show_assistant)
+        
+        self.show_terminal = QtWidgets.QCheckBox("Show Terminal Panel")
+        self.show_terminal.setChecked(self.temp_settings["interface"]["show_terminal"])
+        layout.addRow(self.show_terminal)
+        
+        # UI elements
+        self.toolbar_visible = QtWidgets.QCheckBox("Show Toolbar")
+        self.toolbar_visible.setChecked(self.temp_settings["interface"]["toolbar_visible"])
+        layout.addRow(self.toolbar_visible)
+        
+        self.status_bar_visible = QtWidgets.QCheckBox("Show Status Bar")
+        self.status_bar_visible.setChecked(self.temp_settings["interface"]["status_bar_visible"])
+        layout.addRow(self.status_bar_visible)
+        
+        # Panel layout
+        self.panel_layout = QtWidgets.QComboBox()
+        self.panel_layout.addItems(["vertical", "horizontal", "tabs"])
+        self.panel_layout.setCurrentText(self.temp_settings["interface"]["panel_layout"])
+        layout.addRow("Panel Layout:", self.panel_layout)
+        
+        self.tab_widget.addTab(tab, "Interface")
+    
+    def create_shortcuts_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(tab)
+        
+        # Create scroll area for shortcuts
+        scroll = QtWidgets.QScrollArea()
+        scroll_widget = QtWidgets.QWidget()
+        scroll_layout = QtWidgets.QFormLayout(scroll_widget)
+        
+        self.shortcut_editors = {}
+        shortcuts = self.temp_settings["shortcuts"]
+        
+        for action, shortcut in shortcuts.items():
+            editor = QtWidgets.QKeySequenceEdit()
+            editor.setKeySequence(QtGui.QKeySequence(shortcut))
+            self.shortcut_editors[action] = editor
+            scroll_layout.addRow(action.replace("_", " ").title() + ":", editor)
+        
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
+        
+        self.tab_widget.addTab(tab, "Shortcuts")
+    
+    def create_advanced_tab(self):
+        tab = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(tab)
+        
+        # Debug mode
+        self.debug_mode = QtWidgets.QCheckBox("Enable debug mode")
+        self.debug_mode.setChecked(self.temp_settings["advanced"]["debug_mode"])
+        layout.addRow(self.debug_mode)
+        
+        # Performance mode
+        self.performance_mode = QtWidgets.QCheckBox("Enable performance mode")
+        self.performance_mode.setChecked(self.temp_settings["advanced"]["performance_mode"])
+        layout.addRow(self.performance_mode)
+        
+        # Memory limit
+        self.memory_limit = QtWidgets.QSpinBox()
+        self.memory_limit.setRange(128, 4096)
+        self.memory_limit.setSuffix(" MB")
+        self.memory_limit.setValue(self.temp_settings["advanced"]["memory_limit"])
+        layout.addRow("Memory Limit:", self.memory_limit)
+        
+        # Plugin directory
+        plugin_layout = QtWidgets.QHBoxLayout()
+        self.plugin_directory = QtWidgets.QLineEdit()
+        self.plugin_directory.setText(self.temp_settings["advanced"]["plugin_directory"])
+        plugin_browse = QtWidgets.QPushButton("Browse...")
+        plugin_layout.addWidget(self.plugin_directory)
+        plugin_layout.addWidget(plugin_browse)
+        layout.addRow("Plugin Directory:", plugin_layout)
+        
+        # Backup directory
+        backup_layout = QtWidgets.QHBoxLayout()
+        self.backup_directory = QtWidgets.QLineEdit()
+        self.backup_directory.setText(self.temp_settings["advanced"]["backup_directory"])
+        backup_browse = QtWidgets.QPushButton("Browse...")
+        backup_layout.addWidget(self.backup_directory)
+        backup_layout.addWidget(backup_browse)
+        layout.addRow("Backup Directory:", backup_layout)
+        
+        # Backup count
+        self.backup_count = QtWidgets.QSpinBox()
+        self.backup_count.setRange(1, 100)
+        self.backup_count.setValue(self.temp_settings["advanced"]["backup_count"])
+        layout.addRow("Backup Count:", self.backup_count)
+        
+        # Check updates
+        self.check_updates = QtWidgets.QCheckBox("Check for updates")
+        self.check_updates.setChecked(self.temp_settings["advanced"]["check_updates"])
+        layout.addRow(self.check_updates)
+        
+        # Telemetry
+        self.telemetry = QtWidgets.QCheckBox("Send anonymous usage data")
+        self.telemetry.setChecked(self.temp_settings["advanced"]["telemetry"])
+        layout.addRow(self.telemetry)
+        
+        self.tab_widget.addTab(tab, "Advanced")
+    
+    def collect_settings(self):
+        # General
+        self.temp_settings["general"]["theme"] = self.general_theme.currentText()
+        self.temp_settings["general"]["auto_save"] = self.auto_save.isChecked()
+        self.temp_settings["general"]["auto_save_interval"] = self.auto_save_interval.value()
+        self.temp_settings["general"]["restore_tabs"] = self.restore_tabs.isChecked()
+        self.temp_settings["general"]["confirm_exit"] = self.confirm_exit.isChecked()
+        self.temp_settings["general"]["startup_behavior"] = self.startup_behavior.currentText()
+        
+        # Editor
+        self.temp_settings["editor"]["font_family"] = self.editor_font_family.currentText()
+        self.temp_settings["editor"]["font_size"] = self.editor_font_size.value()
+        self.temp_settings["editor"]["theme"] = self.editor_theme.currentText()
+        self.temp_settings["editor"]["line_numbers"] = self.line_numbers.isChecked()
+        self.temp_settings["editor"]["word_wrap"] = self.word_wrap.isChecked()
+        self.temp_settings["editor"]["indent_size"] = self.indent_size.value()
+        self.temp_settings["editor"]["auto_indent"] = self.auto_indent.isChecked()
+        self.temp_settings["editor"]["highlight_current_line"] = self.highlight_current_line.isChecked()
+        self.temp_settings["editor"]["show_whitespace"] = self.show_whitespace.isChecked()
+        self.temp_settings["editor"]["bracket_matching"] = self.bracket_matching.isChecked()
+        self.temp_settings["editor"]["auto_completion"] = self.auto_completion.isChecked()
+        self.temp_settings["editor"]["minimap"] = self.minimap.isChecked()
+        
+        # Assistant
+        self.temp_settings["assistant"]["font_family"] = self.assistant_font_family.currentText()
+        self.temp_settings["assistant"]["font_size"] = self.assistant_font_size.value()
+        self.temp_settings["assistant"]["theme"] = self.assistant_theme.currentText()
+        self.temp_settings["assistant"]["api_key"] = self.api_key.text()
+        self.temp_settings["assistant"]["model"] = self.model.currentText()
+        self.temp_settings["assistant"]["temperature"] = self.temperature.value()
+        self.temp_settings["assistant"]["max_tokens"] = self.max_tokens.value()
+        self.temp_settings["assistant"]["default_language"] = self.default_language.currentText()
+        self.temp_settings["assistant"]["auto_scroll"] = self.auto_scroll.isChecked()
+        self.temp_settings["assistant"]["markdown_rendering"] = self.markdown_rendering.isChecked()
+        
+        # Terminal
+        self.temp_settings["terminal"]["font_family"] = self.terminal_font_family.currentText()
+        self.temp_settings["terminal"]["font_size"] = self.terminal_font_size.value()
+        self.temp_settings["terminal"]["theme"] = self.terminal_theme.currentText()
+        self.temp_settings["terminal"]["startup_command"] = self.startup_command.text()
+        self.temp_settings["terminal"]["history_size"] = self.history_size.value()
+        self.temp_settings["terminal"]["auto_complete"] = self.terminal_auto_complete.isChecked()
+        
+        # Interface
+        self.temp_settings["interface"]["show_project_explorer"] = self.show_project_explorer.isChecked()
+        self.temp_settings["interface"]["show_assistant"] = self.show_assistant.isChecked()
+        self.temp_settings["interface"]["show_terminal"] = self.show_terminal.isChecked()
+        self.temp_settings["interface"]["toolbar_visible"] = self.toolbar_visible.isChecked()
+        self.temp_settings["interface"]["status_bar_visible"] = self.status_bar_visible.isChecked()
+        self.temp_settings["interface"]["panel_layout"] = self.panel_layout.currentText()
+        
+        # Shortcuts
+        for action, editor in self.shortcut_editors.items():
+            self.temp_settings["shortcuts"][action] = editor.keySequence().toString()
+        
+        # Advanced
+        self.temp_settings["advanced"]["debug_mode"] = self.debug_mode.isChecked()
+        self.temp_settings["advanced"]["performance_mode"] = self.performance_mode.isChecked()
+        self.temp_settings["advanced"]["memory_limit"] = self.memory_limit.value()
+        self.temp_settings["advanced"]["plugin_directory"] = self.plugin_directory.text()
+        self.temp_settings["advanced"]["backup_directory"] = self.backup_directory.text()
+        self.temp_settings["advanced"]["backup_count"] = self.backup_count.value()
+        self.temp_settings["advanced"]["check_updates"] = self.check_updates.isChecked()
+        self.temp_settings["advanced"]["telemetry"] = self.telemetry.isChecked()
+    
+    def apply_settings(self):
+        self.collect_settings()
+        self.settings_manager.settings = self.temp_settings
+        self.settings_manager.save_settings()
+    
+    def restore_defaults(self):
+        reply = QtWidgets.QMessageBox.question(
+            self, "Restore Defaults",
+            "Are you sure you want to restore all settings to default values?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            if os.path.exists(self.settings_manager.config_file):
+                os.remove(self.settings_manager.config_file)
+            self.settings_manager.settings = self.settings_manager.load_settings()
+            self.temp_settings = json.loads(json.dumps(self.settings_manager.settings))
+            self.close()
+            dialog = SettingsDialog(self.settings_manager, self.parent())
+            dialog.exec()
+    
+    def accept(self):
+        self.apply_settings()
+        super().accept()
+
 class ClaudeAIWorker(QtCore.QThread):
     response_received = QtCore.pyqtSignal(str)
 
@@ -40,20 +638,26 @@ class ClaudeAIWidget(QtWidgets.QWidget):
                 self.worker.wait()  # Wait for termination
         event.accept()
         
-    def __init__(self):
+    def __init__(self, settings_manager=None):
         super().__init__()
+        self.settings_manager = settings_manager
 
         # Set up the layout
         self.layout = QtWidgets.QVBoxLayout(self)
 
         # Output window (read-only)
         self.output_window = QtWidgets.QTextEdit(self)
-        self.output_window.setStyleSheet("background-color: #FDF6E3; color: #657B83;")
         
-        # Set font size and type
-        font = QtGui.QFont("Monospace")
-        font.setPointSize(11)
-        self.output_window.setFont(font)
+        # Apply settings if available, otherwise use defaults
+        if self.settings_manager:
+            assistant_settings = self.settings_manager.get_category("assistant")
+            self.apply_settings(assistant_settings)
+        else:
+            # Default fallback styling
+            self.output_window.setStyleSheet("background-color: #FDF6E3; color: #657B83;")
+            font = QtGui.QFont("Monospace")
+            font.setPointSize(11)
+            self.output_window.setFont(font)
         
         self.output_window.setReadOnly(True)        
         self.layout.addWidget(self.output_window)
@@ -130,6 +734,35 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             self.markdown_module = markdown
         except ImportError:
             self.markdown_module = None
+    
+    def apply_settings(self, settings):
+        """Apply assistant settings to this widget"""
+        # Font settings
+        font_family = settings.get("font_family", "Monospace")
+        font_size = settings.get("font_size", 11)
+        font = QtGui.QFont(font_family)
+        font.setPointSize(font_size)
+        self.output_window.setFont(font)
+        
+        # Theme
+        theme = settings.get("theme", "Solarized Light")
+        theme_styles = {
+            "Tokyo Night Day": "background-color: #D5D6DB; color: #4C505E;",
+            "Tokyo Night Storm": "background-color: #24283b; color: #a9b1d6;",
+            "Solarized Light": "background-color: #FDF6E3; color: #657B83;",
+            "Solarized Dark": "background-color: #002B36; color: #839496;",
+            "Dark": "background-color: #2b2b2b; color: #f8f8f2;",
+            "Light": "background-color: #ffffff; color: #000000;"
+        }
+        style = theme_styles.get(theme, theme_styles["Solarized Light"])
+        self.output_window.setStyleSheet(style)
+        
+        # Default language
+        default_language = settings.get("default_language", "English (en-US)")
+        if hasattr(self, 'language_selector'):
+            index = self.language_selector.findText(default_language)
+            if index >= 0:
+                self.language_selector.setCurrentIndex(index)
             
     def toggle_voice_input(self):
         if self.is_listening:
@@ -1121,6 +1754,7 @@ class AdvancedPythonSyntaxHighlighter(QtGui.QSyntaxHighlighter):
 class ProjectExplorer(QtWidgets.QDockWidget):
     def __init__(self, parent=None):
         super().__init__("Project Explorer", parent)
+        self.setObjectName("ProjectExplorer")
         self.parent_window = parent
         
         # Create the main widget
@@ -4079,6 +4713,10 @@ class Pythonico(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # Initialize settings manager
+        self.settings_manager = SettingsManager()
+        self.settings_manager.add_observer(self.on_settings_changed)
+        
         # Initialize dictionaries at the class level
         self.editors = {}
         self.highlighters = {}
@@ -4162,7 +4800,7 @@ class Pythonico(QtWidgets.QMainWindow):
         editor_layout.addWidget(self.line_count)
         editor_layout.addWidget(self.editor)
         
-        self.claude_ai_widget = ClaudeAIWidget()
+        self.claude_ai_widget = ClaudeAIWidget(self.settings_manager)
 
         # Create a horizontal splitter to separate the editor and AI prompt panel
         horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -4216,6 +4854,11 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create and add project explorer as a dock widget
         self.project_explorer = ProjectExplorer(self)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, self.project_explorer)
+        
+        # Set proper initial size for project explorer
+        self.project_explorer.setMinimumWidth(200)
+        self.project_explorer.setMaximumWidth(400)
+        self.project_explorer.resize(250, 600)
 
         # Create an Advanced Python Syntax Highlighter with Tokyo Night theme
         # with the text editor's document
@@ -4225,20 +4868,9 @@ class Pythonico(QtWidgets.QMainWindow):
         main_splitter.setSizes([600, 300])
         self.setCentralWidget(main_splitter)
 
-        # Set the background color to Tokyo Night "Day" theme
-        self.editor.setStyleSheet(
-            "background-color: #D5D6DB; color: #4C505E;")
-
-        # Set font size and font type
-        font = QtGui.QFont("Monospace")
-        font.setPointSize(11)
-        self.editor.setFont(font)
-
-        # Set the tab stop width to 4 characters
-        font = self.editor.font()
-        font_metrics = QtGui.QFontMetrics(font)
-        tab_width = 4 * font_metrics.horizontalAdvance(' ')
-        self.editor.setTabStopWidth(tab_width)
+        # Apply theme and font settings from settings manager
+        editor_settings = self.settings_manager.get_category("editor")
+        self.apply_editor_settings(self.editor, editor_settings)
 
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
@@ -4460,6 +5092,15 @@ class Pythonico(QtWidgets.QMainWindow):
         # Settings menu
         settings_menu = menubar.addMenu("&Settings")
         
+        # Main settings dialog
+        settings_action = QtGui.QAction("Control Panel", self)
+        settings_action.setShortcut(QtGui.QKeySequence("Ctrl+,"))
+        settings_menu.addAction(settings_action)
+        settings_action.triggered.connect(self.open_settings_dialog)
+        
+        # Separator
+        settings_menu.addSeparator()
+        
         editor_font_action = QtGui.QAction("Editor Font", self)
         settings_menu.addAction(editor_font_action)
         editor_font_action.triggered.connect(self.editor_font_dialog)
@@ -4537,6 +5178,26 @@ class Pythonico(QtWidgets.QMainWindow):
         about_action.triggered.connect(self.showAboutDialog)
         help_menu.addAction(about_action)    
         
+        # Restore window geometry and state
+        if hasattr(self, 'settings_manager'):
+            geometry = self.settings_manager.get("interface", "window_geometry")
+            state = self.settings_manager.get("interface", "window_state")
+            
+            if geometry:
+                try:
+                    self.restoreGeometry(QtCore.QByteArray.fromHex(bytes(geometry, 'utf-8')))
+                except:
+                    pass
+            
+            if state:
+                try:
+                    self.restoreState(QtCore.QByteArray.fromHex(bytes(state, 'utf-8')))
+                except:
+                    pass
+            
+            # Apply initial settings
+            self.apply_settings_to_ui(self.settings_manager.settings)
+        
         self.show()
         
     def close_tab(self, index):
@@ -4596,24 +5257,15 @@ class Pythonico(QtWidgets.QMainWindow):
         new_editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
         new_editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        # Set background color for the "Day" theme of Tokyo Night
-        new_editor.setStyleSheet("background-color: #D5D6DB; color: #4C505E;")
-
-        # Set font size and type
-        font = QtGui.QFont("Monospace")
-        font.setPointSize(11)
-        new_editor.setFont(font)
-
-        # Set tab stop width to 4 characters
-        font_metrics = QtGui.QFontMetrics(font)
-        tab_width = 4 * font_metrics.horizontalAdvance(' ')
-        new_editor.setTabStopWidth(tab_width)
+        # Apply settings to new editor
+        editor_settings = self.settings_manager.get_category("editor")
+        self.apply_editor_settings(new_editor, editor_settings)
 
         # Create an instance of LineCountWidget
         line_count = LineCountWidget(new_editor)
 
-        # Create an instance of ClaudeAIWidget
-        ai_prompt = ClaudeAIWidget()
+        # Create an instance of ClaudeAIWidget with settings
+        ai_prompt = ClaudeAIWidget(self.settings_manager)
 
         # Create a layout for the new tab with split view support
         editor_widget = QtWidgets.QWidget()
@@ -5688,8 +6340,378 @@ class Pythonico(QtWidgets.QMainWindow):
         except Exception as e:
             print(f"Error during thread cleanup: {e}")
 
+    def open_settings_dialog(self):
+        """Open the main settings dialog"""
+        dialog = SettingsDialog(self.settings_manager, self)
+        dialog.exec()
+    
+    def on_settings_changed(self, settings):
+        """Handle settings changes"""
+        self.apply_settings_to_ui(settings)
+    
+    def apply_settings_to_ui(self, settings):
+        """Apply settings to the current UI"""
+        # Apply application theme first
+        general_settings = settings.get("general", {})
+        app_theme = general_settings.get("theme", "Tokyo Night Day")
+        self.apply_application_theme(app_theme)
+        
+        # Apply editor settings to all open editors
+        editor_settings = settings.get("editor", {})
+        for index, editor in self.editors.items():
+            self.apply_editor_settings(editor, editor_settings)
+        
+        # Apply to main editor if it exists
+        if hasattr(self, 'editor') and self.editor:
+            self.apply_editor_settings(self.editor, editor_settings)
+        
+        # Apply assistant settings to all Claude AI widgets
+        assistant_settings = settings.get("assistant", {})
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            claude_widget = widget.findChild(ClaudeAIWidget)
+            if claude_widget:
+                self.apply_assistant_settings(claude_widget, assistant_settings)
+        
+        # Apply main Claude AI widget settings
+        if hasattr(self, 'claude_ai_widget') and self.claude_ai_widget:
+            self.apply_assistant_settings(self.claude_ai_widget, assistant_settings)
+        
+        # Apply terminal settings
+        terminal_settings = settings.get("terminal", {})
+        if hasattr(self, 'python_console') and self.python_console:
+            self.apply_terminal_settings(self.python_console, terminal_settings)
+        
+        # Apply interface settings
+        interface_settings = settings.get("interface", {})
+        self.apply_interface_settings(interface_settings)
+    
+    def apply_editor_settings(self, editor, settings):
+        """Apply settings to a specific editor"""
+        if not editor:
+            return
+        
+        # Font settings
+        font_family = settings.get("font_family", "Monospace")
+        font_size = settings.get("font_size", 11)
+        font = QtGui.QFont(font_family)
+        font.setPointSize(font_size)
+        editor.setFont(font)
+        
+        # Tab width (must be set after font)
+        font_metrics = QtGui.QFontMetrics(font)
+        tab_width = settings.get("indent_size", 4) * font_metrics.horizontalAdvance(' ')
+        editor.setTabStopWidth(tab_width)
+        
+        # Word wrap
+        if settings.get("word_wrap", False):
+            editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.WidgetWidth)
+        else:
+            editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        
+        # Theme/Colors
+        theme = settings.get("theme", "Tokyo Night Day")
+        self.apply_theme_to_editor(editor, theme)
+    
+    def apply_assistant_settings(self, claude_widget, settings):
+        """Apply settings to a Claude AI widget"""
+        if not claude_widget:
+            return
+        
+        # Font settings
+        font_family = settings.get("font_family", "Monospace")
+        font_size = settings.get("font_size", 11)
+        font = QtGui.QFont(font_family)
+        font.setPointSize(font_size)
+        if hasattr(claude_widget, 'output_window'):
+            claude_widget.output_window.setFont(font)
+        
+        # Theme
+        theme = settings.get("theme", "Solarized Light")
+        if hasattr(claude_widget, 'output_window'):
+            self.apply_theme_to_assistant(claude_widget.output_window, theme)
+        
+        # Default language
+        default_language = settings.get("default_language", "English (en-US)")
+        if hasattr(claude_widget, 'language_selector'):
+            index = claude_widget.language_selector.findText(default_language)
+            if index >= 0:
+                claude_widget.language_selector.setCurrentIndex(index)
+    
+    def apply_terminal_settings(self, terminal, settings):
+        """Apply settings to the terminal"""
+        if not terminal:
+            return
+        
+        # Font settings
+        font_family = settings.get("font_family", "Monospace")
+        font_size = settings.get("font_size", 11)
+        font = QtGui.QFont(font_family)
+        font.setPointSize(font_size)
+        terminal.setFont(font)
+    
+    def apply_interface_settings(self, settings):
+        """Apply interface settings"""
+        # Panel visibility
+        if hasattr(self, 'project_explorer'):
+            if settings.get("show_project_explorer", True):
+                self.project_explorer.show()
+            else:
+                self.project_explorer.hide()
+        
+        if hasattr(self, 'claude_ai_widget'):
+            if settings.get("show_assistant", True):
+                self.claude_ai_widget.show()
+            else:
+                self.claude_ai_widget.hide()
+        
+        if hasattr(self, 'python_console'):
+            if settings.get("show_terminal", True):
+                self.python_console.show()
+            else:
+                self.python_console.hide()
+    
+    def apply_application_theme(self, theme):
+        """Apply application-wide theme"""
+        app_styles = {
+            "Tokyo Night Day": """
+                QMainWindow {
+                    background-color: #D5D6DB;
+                    color: #4C505E;
+                }
+                QMenuBar {
+                    background-color: #E9E9ED;
+                    color: #4C505E;
+                    border-bottom: 1px solid #C4C6CD;
+                }
+                QMenuBar::item:selected {
+                    background-color: #7AA2F7;
+                    color: white;
+                }
+                QMenu {
+                    background-color: #F7F7FB;
+                    color: #4C505E;
+                    border: 1px solid #C4C6CD;
+                }
+                QMenu::item:selected {
+                    background-color: #7AA2F7;
+                    color: white;
+                }
+                QDockWidget {
+                    background-color: #E9E9ED;
+                    color: #4C505E;
+                    titlebar-close-icon: none;
+                    titlebar-normal-icon: none;
+                }
+                QDockWidget::title {
+                    background-color: #E9E9ED;
+                    color: #4C505E;
+                    padding: 4px;
+                }
+            """,
+            "Tokyo Night Storm": """
+                QMainWindow {
+                    background-color: #24283b;
+                    color: #a9b1d6;
+                }
+                QMenuBar {
+                    background-color: #1f2335;
+                    color: #a9b1d6;
+                    border-bottom: 1px solid #414868;
+                }
+                QMenuBar::item:selected {
+                    background-color: #7aa2f7;
+                    color: white;
+                }
+                QMenu {
+                    background-color: #1f2335;
+                    color: #a9b1d6;
+                    border: 1px solid #414868;
+                }
+                QMenu::item:selected {
+                    background-color: #7aa2f7;
+                    color: white;
+                }
+                QDockWidget {
+                    background-color: #1f2335;
+                    color: #a9b1d6;
+                }
+                QDockWidget::title {
+                    background-color: #1f2335;
+                    color: #a9b1d6;
+                    padding: 4px;
+                }
+            """,
+            "Dark": """
+                QMainWindow {
+                    background-color: #2b2b2b;
+                    color: #f8f8f2;
+                }
+                QMenuBar {
+                    background-color: #1e1e1e;
+                    color: #f8f8f2;
+                    border-bottom: 1px solid #404040;
+                }
+                QMenuBar::item:selected {
+                    background-color: #0078d4;
+                    color: white;
+                }
+                QMenu {
+                    background-color: #1e1e1e;
+                    color: #f8f8f2;
+                    border: 1px solid #404040;
+                }
+                QMenu::item:selected {
+                    background-color: #0078d4;
+                    color: white;
+                }
+                QDockWidget {
+                    background-color: #1e1e1e;
+                    color: #f8f8f2;
+                }
+                QDockWidget::title {
+                    background-color: #1e1e1e;
+                    color: #f8f8f2;
+                    padding: 4px;
+                }
+            """,
+            "Solarized Light": """
+                QMainWindow {
+                    background-color: #FDF6E3;
+                    color: #657B83;
+                }
+                QMenuBar {
+                    background-color: #EEE8D5;
+                    color: #657B83;
+                    border-bottom: 1px solid #93A1A1;
+                }
+                QMenuBar::item:selected {
+                    background-color: #268BD2;
+                    color: white;
+                }
+                QMenu {
+                    background-color: #FDF6E3;
+                    color: #657B83;
+                    border: 1px solid #93A1A1;
+                }
+                QMenu::item:selected {
+                    background-color: #268BD2;
+                    color: white;
+                }
+                QDockWidget {
+                    background-color: #EEE8D5;
+                    color: #657B83;
+                }
+                QDockWidget::title {
+                    background-color: #EEE8D5;
+                    color: #657B83;
+                    padding: 4px;
+                }
+            """,
+            "Solarized Dark": """
+                QMainWindow {
+                    background-color: #002B36;
+                    color: #839496;
+                }
+                QMenuBar {
+                    background-color: #073642;
+                    color: #839496;
+                    border-bottom: 1px solid #586E75;
+                }
+                QMenuBar::item:selected {
+                    background-color: #268BD2;
+                    color: white;
+                }
+                QMenu {
+                    background-color: #002B36;
+                    color: #839496;
+                    border: 1px solid #586E75;
+                }
+                QMenu::item:selected {
+                    background-color: #268BD2;
+                    color: white;
+                }
+                QDockWidget {
+                    background-color: #073642;
+                    color: #839496;
+                }
+                QDockWidget::title {
+                    background-color: #073642;
+                    color: #839496;
+                    padding: 4px;
+                }
+            """,
+            "Light": """
+                QMainWindow {
+                    background-color: #ffffff;
+                    color: #000000;
+                }
+                QMenuBar {
+                    background-color: #f0f0f0;
+                    color: #000000;
+                    border-bottom: 1px solid #d0d0d0;
+                }
+                QMenuBar::item:selected {
+                    background-color: #0078d4;
+                    color: white;
+                }
+                QMenu {
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #d0d0d0;
+                }
+                QMenu::item:selected {
+                    background-color: #0078d4;
+                    color: white;
+                }
+                QDockWidget {
+                    background-color: #f0f0f0;
+                    color: #000000;
+                }
+                QDockWidget::title {
+                    background-color: #f0f0f0;
+                    color: #000000;
+                    padding: 4px;
+                }
+            """
+        }
+        
+        style = app_styles.get(theme, app_styles["Tokyo Night Day"])
+        self.setStyleSheet(style)
+    
+    def apply_theme_to_editor(self, editor, theme):
+        """Apply theme to editor"""
+        theme_styles = {
+            "Tokyo Night Day": "background-color: #D5D6DB; color: #4C505E;",
+            "Tokyo Night Storm": "background-color: #24283b; color: #a9b1d6;",
+            "Solarized Light": "background-color: #FDF6E3; color: #657B83;",
+            "Solarized Dark": "background-color: #002B36; color: #839496;",
+            "Dark": "background-color: #2b2b2b; color: #f8f8f2;",
+            "Light": "background-color: #ffffff; color: #000000;"
+        }
+        style = theme_styles.get(theme, theme_styles["Tokyo Night Day"])
+        editor.setStyleSheet(style)
+    
+    def apply_theme_to_assistant(self, widget, theme):
+        """Apply theme to assistant widget"""
+        theme_styles = {
+            "Tokyo Night Day": "background-color: #D5D6DB; color: #4C505E;",
+            "Tokyo Night Storm": "background-color: #24283b; color: #a9b1d6;",
+            "Solarized Light": "background-color: #FDF6E3; color: #657B83;",
+            "Solarized Dark": "background-color: #002B36; color: #839496;",
+            "Dark": "background-color: #2b2b2b; color: #f8f8f2;",
+            "Light": "background-color: #ffffff; color: #000000;"
+        }
+        style = theme_styles.get(theme, theme_styles["Solarized Light"])
+        widget.setStyleSheet(style)
+
     def closeEvent(self, event):
         """Handle application close event"""
+        # Save window geometry and state
+        if hasattr(self, 'settings_manager'):
+            self.settings_manager.set("interface", "window_geometry", self.saveGeometry().data().hex())
+            self.settings_manager.set("interface", "window_state", self.saveState().data().hex())
+        
         self.cleanup_threads()
         event.accept()
 
