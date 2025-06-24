@@ -108,27 +108,6 @@ define print_error
 	@echo "[ERROR] $(1)"
 endef
 
-# PyInstaller Arguments
-PYINSTALLER_ARGS = \
-    --clean \
-    --onefile \
-    --windowed \
-    --strip \
-    --optimize=2 \
-    --add-data "$(ICON_PNG)$(DATA_SEP)icons" \
-    --icon="$(ICON_FILE)" \
-    --exclude-module tkinter \
-    --exclude-module matplotlib \
-    --exclude-module PIL \
-    --exclude-module numpy \
-    --exclude-module pandas \
-    --hidden-import=anthropic \
-    --hidden-import=speech_recognition \
-    --hidden-import=pyaudio \
-    --hidden-import=PyQt6 \
-    --hidden-import=pyqtconsole \
-    --hidden-import=markdown \
-    --name=$(PROJECT_NAME)
 
 # Default target
 .DEFAULT_GOAL := all
@@ -182,13 +161,18 @@ help: ## Show this help message
 all: clean-build deps build ## Complete build process (clean, install deps, build)
 
 .PHONY: build
-build: ## Build the executable using PyInstaller
+build: ## Build the executable using PyInstaller spec file
 	$(call print_header,Building $(PROJECT_NAME))
-	$(call print_status,Building executable with PyInstaller...)
-	@if [ -f "$(VENV_ACTIVATE)" ]; then \
-		. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller $(PYINSTALLER_ARGS) $(PYTHON_FILE); \
+	$(call print_status,Building executable with PyInstaller spec file...)
+	@if [ -f "$(PROJECT_NAME).spec" ]; then \
+		if [ -f "$(VENV_ACTIVATE)" ]; then \
+			. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller $(PROJECT_NAME).spec; \
+		else \
+			$(PYTHON) -m PyInstaller $(PROJECT_NAME).spec; \
+		fi; \
 	else \
-		$(PYTHON) -m PyInstaller $(PYINSTALLER_ARGS) $(PYTHON_FILE); \
+		echo "[ERROR] No spec file found at $(PROJECT_NAME).spec"; \
+		exit 1; \
 	fi
 	@if [ -f "$(EXECUTABLE)" ]; then \
 		echo "[SUCCESS] Build completed successfully!"; \
@@ -204,10 +188,15 @@ build: ## Build the executable using PyInstaller
 build-debug: ## Build with debug information enabled
 	$(call print_header,Debug Build)
 	$(call print_status,Building $(PROJECT_NAME) with debug info...)
-	@if [ -f "$(VENV_ACTIVATE)" ]; then \
-		. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller $(PYINSTALLER_ARGS) --debug=all --console $(PYTHON_FILE); \
+	@if [ -f "$(PROJECT_NAME).spec" ]; then \
+		if [ -f "$(VENV_ACTIVATE)" ]; then \
+			. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller --debug=all --console $(PROJECT_NAME).spec; \
+		else \
+			$(PYTHON) -m PyInstaller --debug=all --console $(PROJECT_NAME).spec; \
+		fi; \
 	else \
-		$(PYTHON) -m PyInstaller $(PYINSTALLER_ARGS) --debug=all --console $(PYTHON_FILE); \
+		echo "[ERROR] No spec file found at $(PROJECT_NAME).spec"; \
+		exit 1; \
 	fi
 	$(call print_success,Debug build complete! Executable: $(EXECUTABLE))
 
@@ -215,10 +204,15 @@ build-debug: ## Build with debug information enabled
 build-optimized: venv deps upx-check ## Build with maximum optimization (requires UPX)
 	$(call print_header,Optimized Build)
 	$(call print_status,Building optimized $(PROJECT_NAME)...)
-	@if [ -f "$(VENV_ACTIVATE)" ]; then \
-		. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller $(PYINSTALLER_ARGS) --upx-dir . $(PYTHON_FILE); \
+	@if [ -f "$(PROJECT_NAME).spec" ]; then \
+		if [ -f "$(VENV_ACTIVATE)" ]; then \
+			. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller --upx-dir . $(PROJECT_NAME).spec; \
+		else \
+			$(PYTHON) -m PyInstaller --upx-dir . $(PROJECT_NAME).spec; \
+		fi; \
 	else \
-		$(PYTHON) -m PyInstaller $(PYINSTALLER_ARGS) --upx-dir . $(PYTHON_FILE); \
+		echo "[ERROR] No spec file found at $(PROJECT_NAME).spec"; \
+		exit 1; \
 	fi
 ifeq ($(OS),windows)
 	@if exist "$(EXECUTABLE)" upx --best "$(EXECUTABLE)" 2>nul || echo "[WARNING] UPX compression skipped"
@@ -461,11 +455,9 @@ clean-build: ## Clean build artifacts
 	@if [ "$(OS)" = "windows" ]; then \
 		cmd /c "if exist \"$(BUILD_DIR)\" rmdir /s /q \"$(BUILD_DIR)\" 2>nul"; \
 		cmd /c "if exist \"$(DIST_DIR)\" rmdir /s /q \"$(DIST_DIR)\" 2>nul"; \
-		cmd /c "if exist \"*.spec\" del /q *.spec 2>nul"; \
 	else \
 		rm -rf $(BUILD_DIR); \
 		rm -rf $(DIST_DIR); \
-		rm -f *.spec; \
 	fi
 
 .PHONY: clean-cache
@@ -576,11 +568,15 @@ version: ## Show version information
 .PHONY: debug
 debug: clean-build ## Debug build with verbose output
 	$(call print_header,Debug Build with Verbose Output)
-	@if [ -f "$(VENV_ACTIVATE)" ]; then \
-		. $(VENV_ACTIVATE) && \
-		$(PYTHON) -m PyInstaller --clean --debug=all --console $(PYINSTALLER_ARGS) $(PYTHON_FILE); \
+	@if [ -f "$(PROJECT_NAME).spec" ]; then \
+		if [ -f "$(VENV_ACTIVATE)" ]; then \
+			. $(VENV_ACTIVATE) && $(PYTHON) -m PyInstaller --clean --debug=all --console $(PROJECT_NAME).spec; \
+		else \
+			$(PYTHON) -m PyInstaller --clean --debug=all --console $(PROJECT_NAME).spec; \
+		fi; \
 	else \
-		$(PYTHON) -m PyInstaller --clean --debug=all --console $(PYINSTALLER_ARGS) $(PYTHON_FILE); \
+		echo "[ERROR] No spec file found at $(PROJECT_NAME).spec"; \
+		exit 1; \
 	fi
 
 # Add all phony targets
