@@ -967,7 +967,7 @@ class LineCountWidget(QtWidgets.QWidget):
         self.breakpoints = set()
         
         # Set initial properties
-        self.setFixedWidth(35)  # Much smaller width
+        self.setFixedWidth(10)
         self.setMinimumHeight(0)
         
         # Configure appearance
