@@ -967,7 +967,7 @@ class LineCountWidget(QtWidgets.QWidget):
         self.breakpoints = set()
         
         # Set initial properties
-        self.setFixedWidth(60)
+        self.setFixedWidth(35)  # Much smaller width
         self.setMinimumHeight(0)
         
         # Configure appearance
@@ -1014,11 +1014,11 @@ class LineCountWidget(QtWidgets.QWidget):
         total_lines = self.editor.blockCount()
         max_digits = len(str(total_lines))
         font_metrics = self.editor.fontMetrics()  # Use editor's font metrics
-        sample_text = "→" + "9" * max_digits
+        sample_text = "9" * max_digits  # Remove arrow from sample text
         text_width = font_metrics.horizontalAdvance(sample_text)
-        optimal_width = text_width + 20
+        optimal_width = text_width + 12  # Reduced padding
         
-        new_width = max(50, min(120, optimal_width))
+        new_width = max(30, min(60, optimal_width))  # Much smaller width range
         if self.width() != new_width:
             self.setFixedWidth(new_width)
     
@@ -1070,26 +1070,20 @@ class LineCountWidget(QtWidgets.QWidget):
         while block.isValid() and current_y < self.height():
             display_line = block_number + 1
             
-            # Choose color and prefix based on line state
+            # Choose color based on line state (no prefix symbols)
             if display_line in self.breakpoints:
                 painter.setPen(QtGui.QColor("#d32f2f"))  # Red for breakpoints
-                prefix = "●"
             elif block_number == current_line:
                 painter.setPen(QtGui.QColor("#1976d2"))  # Blue for current line
-                prefix = "→"
             else:
                 painter.setPen(QtGui.QColor("#666666"))  # Gray for normal lines
-                prefix = " "
             
-            # Format and draw the line number
-            if prefix in ["●", "→"]:
-                text = f"{prefix}{display_line}"
-            else:
-                text = f"{display_line}"
+            # Format line number without any prefix symbols
+            text = f"{display_line}"
             
-            # Right-align the text
+            # Right-align the text with reduced padding
             text_width = font_metrics.horizontalAdvance(text)
-            x_position = self.width() - text_width - 8
+            x_position = self.width() - text_width - 4  # Reduced padding
             
             # Draw the line number if it's within the visible area
             if current_y > 0 and current_y < self.height():
@@ -1174,7 +1168,7 @@ class LineCountWidget(QtWidgets.QWidget):
     
     def sizeHint(self):
         """Provide size hint for layout"""
-        return QtCore.QSize(80, 0)
+        return QtCore.QSize(40, 0)  # Much smaller width hint
 
 class AutoIndentFilter(QtCore.QObject):
     def __init__(self, editor):
