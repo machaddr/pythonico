@@ -4419,6 +4419,25 @@ class AdvancedCodeCompleter(QtWidgets.QCompleter):
         self.setWrapAround(False)
         self.setMaxVisibleItems(15)
         self.setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
+        
+        # Initialize code snippets
+        self.code_snippets = {
+            'if': 'if ${condition}:\n    ${cursor}',
+            'for': 'for ${item} in ${iterable}:\n    ${cursor}',
+            'while': 'while ${condition}:\n    ${cursor}',
+            'def': 'def ${function_name}(${parameters}):\n    """${description}"""\n    ${cursor}',
+            'class': 'class ${class_name}:\n    """${description}"""\n    \n    def __init__(self):\n        ${cursor}',
+            'try': 'try:\n    ${cursor}\nexcept ${exception}:\n    pass',
+            'with': 'with ${context} as ${variable}:\n    ${cursor}',
+            'lambda': 'lambda ${parameters}: ${expression}',
+            'list_comp': '[${expression} for ${item} in ${iterable}]',
+            'dict_comp': '{${key}: ${value} for ${item} in ${iterable}}',
+            'import': 'import ${module}',
+            'from': 'from ${module} import ${item}'
+        }
+        
+        # Initialize completion data
+        self.initialize_completion_data()
     
     def initialize_completion_data(self):
         """Initialize the comprehensive completion database"""
@@ -6645,12 +6664,33 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create line count widget for split editor
         split_line_count = LineCountWidget(split_editor)
         
-        # Create widget to hold split editor and line count
+        # Create bottom completer for split editor
+        split_bottom_completer = BottomCodeCompleter()
+        split_bottom_completer.set_editor(split_editor)
+        
+        # Apply editor settings to the split completer
+        editor_settings = self.settings_manager.get_category("editor")
+        self.apply_completer_settings(split_bottom_completer, editor_settings)
+        
+        # Create widget to hold split editor, line count, and completer
         split_widget = QtWidgets.QWidget()
-        split_layout = QtWidgets.QHBoxLayout(split_widget)
+        split_layout = QtWidgets.QVBoxLayout(split_widget)
         split_layout.setContentsMargins(0, 0, 0, 0)
-        split_layout.addWidget(split_line_count)
-        split_layout.addWidget(split_editor)
+        split_layout.setSpacing(0)
+        
+        # Create horizontal layout for editor and line count
+        editor_layout = QtWidgets.QHBoxLayout()
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.addWidget(split_line_count)
+        editor_layout.addWidget(split_editor)
+        
+        # Create widget for editor layout
+        editor_widget = QtWidgets.QWidget()
+        editor_widget.setLayout(editor_layout)
+        
+        # Add editor and completer to main layout
+        split_layout.addWidget(editor_widget)
+        split_layout.addWidget(split_bottom_completer)
         
         # Set orientation and add to splitter
         splitter.setOrientation(orientation)
@@ -6667,18 +6707,12 @@ class Pythonico(QtWidgets.QMainWindow):
         split_filter = AutoIndentFilter(split_editor)
         split_editor.installEventFilter(split_filter)
         
-        split_completer = AdvancedCodeCompleter()
-        split_completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
-        split_completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
-        split_completer.setWrapAround(False)
-        split_completer.setWidget(split_editor)
+        # Connect bottom completer signals for split editor
+        split_bottom_completer.completion_selected.connect(lambda text: self.insert_completion_for_editor(split_editor, text))
+        split_editor.textChanged.connect(lambda: self.update_bottom_completer_for_editor(split_editor, split_bottom_completer))
         
-        # Set transient parent for Wayland compatibility
-        split_popup = split_completer.popup()
-        if split_popup and hasattr(split_popup, 'setParent'):
-            split_popup.setParent(split_editor.window(), QtCore.Qt.WindowType.Popup)
-        
-        split_editor.textChanged.connect(lambda: self.update_completer_for_editor(split_editor, split_completer))
+        # Ensure split completer width matches editor after layout is complete
+        QtCore.QTimer.singleShot(100, split_bottom_completer.set_width_to_match_editor)
         
         # Sync content between main and split editor
         def sync_to_split():
