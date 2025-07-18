@@ -3760,6 +3760,635 @@ class debugger(AdvancedDebugger):
             self.debug_stop()
         event.accept()
 
+class BottomCodeCompleter(QtWidgets.QWidget):
+    """
+    Simplistic bottom-positioned code completer widget.
+    Shows completion suggestions in a quadratic panel at the bottom of the editor
+    without occupying editor space.
+    """
+    
+    completion_selected = QtCore.pyqtSignal(str)
+    
+    # Completion item types with simple styling
+    COMPLETION_TYPES = {
+        'keyword': {'color': '#bb9af7', 'prefix': 'K'},
+        'builtin': {'color': '#7dcfff', 'prefix': 'B'},
+        'function': {'color': '#7aa2f7', 'prefix': 'F'},
+        'method': {'color': '#7aa2f7', 'prefix': 'M'},
+        'class': {'color': '#f7768e', 'prefix': 'C'},
+        'module': {'color': '#9ece6a', 'prefix': 'P'},
+        'variable': {'color': '#e0af68', 'prefix': 'V'},
+        'parameter': {'color': '#ff9e64', 'prefix': 'A'},
+        'attribute': {'color': '#89ddff', 'prefix': 'T'},
+        'constant': {'color': '#ff7a93', 'prefix': 'N'},
+        'import': {'color': '#9ece6a', 'prefix': 'I'},
+        'snippet': {'color': '#c0caf5', 'prefix': 'S'}
+    }
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.editor_widget = None
+        self.completion_items = []
+        self.filtered_items = []
+        self.current_prefix = ""
+        self.selected_index = 0
+        self.current_theme = "Tokyo Night Day"  # Default theme
+        
+        self.init_ui()
+        self.init_completion_data()
+        
+        # Hide initially
+        self.hide()
+        
+    def init_ui(self):
+        """Initialize the simplistic UI"""
+        self.setFixedHeight(120)  # Fixed height for quadratic look
+        
+        # Main layout
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Completion list widget with editor-matching styling
+        self.completion_list = QtWidgets.QListWidget()
+        self.completion_list.setAlternatingRowColors(True)
+        self.completion_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        
+        # Apply default theme
+        self.apply_theme(self.current_theme)
+        
+        layout.addWidget(self.completion_list)
+        
+        # Connect signals
+        self.completion_list.itemClicked.connect(self.on_item_selected)
+        self.completion_list.itemActivated.connect(self.on_item_selected)
+        
+    def apply_theme(self, theme):
+        """Apply theme to match the editor styling"""
+        self.current_theme = theme
+        
+        # Theme styles matching the editor exactly
+        theme_styles = {
+            "Tokyo Night Day": {
+                "background": "#D5D6DB",
+                "foreground": "#4C505E",
+                "selection": "#B4B8CC",
+                "border": "#C0C4D8",
+                "alternate": "#E0E4F0"
+            },
+            "Tokyo Night Storm": {
+                "background": "#24283b",
+                "foreground": "#a9b1d6",
+                "selection": "#414868",
+                "border": "#565f89",
+                "alternate": "#2a2e44"
+            },
+            "Solarized Light": {
+                "background": "#FDF6E3",
+                "foreground": "#657B83",
+                "selection": "#EEE8D5",
+                "border": "#93A1A1",
+                "alternate": "#F5F0E8"
+            },
+            "Solarized Dark": {
+                "background": "#002B36",
+                "foreground": "#839496",
+                "selection": "#073642",
+                "border": "#586e75",
+                "alternate": "#022730"
+            },
+            "Dark": {
+                "background": "#2b2b2b",
+                "foreground": "#f8f8f2",
+                "selection": "#49483e",
+                "border": "#75715e",
+                "alternate": "#383830"
+            },
+            "Light": {
+                "background": "#ffffff",
+                "foreground": "#000000",
+                "selection": "#e3f2fd",
+                "border": "#d0d0d0",
+                "alternate": "#f5f5f5"
+            }
+        }
+        
+        colors = theme_styles.get(theme, theme_styles["Tokyo Night Day"])
+        
+        # Apply comprehensive styling to match editor
+        self.completion_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {colors["background"]};
+                color: {colors["foreground"]};
+                border: 2px solid {colors["border"]};
+                border-radius: 0px;
+                font-family: 'Monospace', 'Courier New', monospace;
+                font-size: 11px;
+                outline: none;
+                padding: 2px;
+                selection-background-color: transparent;
+            }}
+            QListWidget::item {{
+                padding: 4px 8px;
+                border: none;
+                border-bottom: 1px solid {colors["border"]};
+                min-height: 18px;
+                color: {colors["foreground"]};
+            }}
+            QListWidget::item:selected {{
+                background-color: {colors["selection"]};
+                color: {colors["foreground"]};
+                font-weight: bold;
+            }}
+            QListWidget::item:hover {{
+                background-color: {colors["selection"]};
+                color: {colors["foreground"]};
+            }}
+            QListWidget::item:alternate {{
+                background-color: {colors["alternate"]};
+            }}
+        """)
+        
+        # Apply theme to main widget
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {colors["background"]};
+                border: 2px solid {colors["border"]};
+                border-radius: 0px;
+            }}
+        """)
+    
+    def apply_editor_font(self, font):
+        """Apply the same font as the editor"""
+        self.completion_list.setFont(font)
+        
+        # Update styling with font size
+        current_style = self.completion_list.styleSheet()
+        # Remove any existing font-size declarations and add the new one
+        import re
+        style_without_font_size = re.sub(r'font-size:\s*\d+px;', '', current_style)
+        new_style = style_without_font_size.replace(
+            'font-family:', f'font-size: {font.pointSize()}px; font-family:'
+        )
+        self.completion_list.setStyleSheet(new_style)
+    
+    def set_width_to_match_editor(self):
+        """Set the completer width and position to align exactly with the editor text area"""
+        if not self.editor_widget:
+            return
+            
+        # Find the line count widget associated with our editor
+        line_count_widget = None
+        
+        # Navigate up to find the editor's parent container
+        current_parent = self.editor_widget.parent()
+        while current_parent:
+            # Look for LineCountWidget in the same layout as our editor
+            for child in current_parent.findChildren(LineCountWidget):
+                if hasattr(child, 'editor') and child.editor == self.editor_widget:
+                    line_count_widget = child
+                    break
+            if line_count_widget:
+                break
+            current_parent = current_parent.parent()
+        
+        if line_count_widget:
+            # Calculate exact positioning to align with editor text content
+            line_count_width = line_count_widget.width()
+            editor_width = self.editor_widget.width()
+            
+            # Account for the scroll bar width to match the complete editor area
+            scroll_bar_width = 0
+            if self.editor_widget.verticalScrollBar().isVisible():
+                scroll_bar_width = self.editor_widget.verticalScrollBar().width()
+            
+            # Set our total width to match the complete editor area including scroll bar
+            total_width = line_count_width + editor_width + scroll_bar_width
+            self.setFixedWidth(total_width)
+            
+            # Calculate the exact left margin to align with editor text content
+            layout = self.layout()
+            if layout:
+                # Account for typical spacing between line count widget and editor in QHBoxLayout
+                # Usually there's 0-2px spacing, so we add a small adjustment
+                spacing_adjustment = 0
+                
+                # Check if the editor and line count are in a layout with spacing
+                parent_widget = line_count_widget.parent()
+                if parent_widget and hasattr(parent_widget, 'layout') and parent_widget.layout():
+                    parent_layout = parent_widget.layout()
+                    if hasattr(parent_layout, 'spacing'):
+                        spacing_adjustment = parent_layout.spacing()
+                
+                # Set left margin to align with editor text content
+                left_margin = line_count_width + spacing_adjustment
+                layout.setContentsMargins(left_margin, 0, 0, 0)
+        elif self.editor_widget:
+            # Fallback: match editor width including scroll bar
+            editor_width = self.editor_widget.width()
+            scroll_bar_width = 0
+            if self.editor_widget.verticalScrollBar().isVisible():
+                scroll_bar_width = self.editor_widget.verticalScrollBar().width()
+            
+            total_width = editor_width + scroll_bar_width
+            self.setFixedWidth(total_width)
+            
+            # Reset margins if no line count widget
+            layout = self.layout()
+            if layout:
+                layout.setContentsMargins(0, 0, 0, 0)
+    
+    def resizeEvent(self, event):
+        """Handle resize events to maintain width matching"""
+        super().resizeEvent(event)
+        # Ensure we maintain the width match when the parent resizes
+        QtCore.QTimer.singleShot(0, self.set_width_to_match_editor)
+    
+    def eventFilter(self, obj, event):
+        """Filter events from the editor and line count widget to track resize and font changes"""
+        if obj == self.editor_widget:
+            if event.type() == QtCore.QEvent.Type.Resize:
+                # Editor was resized, update our width and alignment
+                QtCore.QTimer.singleShot(0, self.set_width_to_match_editor)
+            elif event.type() == QtCore.QEvent.Type.FontChange:
+                # Editor font changed, update our font
+                self.apply_editor_font(self.editor_widget.font())
+        elif isinstance(obj, LineCountWidget):
+            if event.type() == QtCore.QEvent.Type.Resize:
+                # Line count widget was resized, update our alignment
+                QtCore.QTimer.singleShot(0, self.set_width_to_match_editor)
+        return super().eventFilter(obj, event)
+        
+    def set_editor(self, editor):
+        """Set the editor widget this completer is associated with"""
+        self.editor_widget = editor
+        
+        # Apply the editor's font to the completer
+        if editor:
+            self.apply_editor_font(editor.font())
+            # Set width to match editor initially
+            QtCore.QTimer.singleShot(0, self.set_width_to_match_editor)
+            
+            # Install event filter to monitor editor resize events
+            editor.installEventFilter(self)
+            
+            # Also monitor the line count widget for size changes
+            current_parent = editor.parent()
+            while current_parent:
+                for child in current_parent.findChildren(LineCountWidget):
+                    if hasattr(child, 'editor') and child.editor == editor:
+                        child.installEventFilter(self)
+                        break
+                if current_parent.findChildren(LineCountWidget):
+                    break
+                current_parent = current_parent.parent()
+            
+            # Connect to editor's font change events if possible
+            if hasattr(editor, 'font'):
+                # Monitor for font changes
+                original_setFont = editor.setFont
+                def monitor_font_change(font):
+                    original_setFont(font)
+                    self.apply_editor_font(font)
+                    QtCore.QTimer.singleShot(0, self.set_width_to_match_editor)
+                editor.setFont = monitor_font_change
+        
+    def init_completion_data(self):
+        """Initialize completion data with basic Python items"""
+        self.completion_items = []
+        
+        # Add Python keywords
+        for kw in keyword.kwlist:
+            self.add_completion_item(kw, 'keyword')
+        
+        # Add common built-ins
+        builtins = ['print', 'len', 'range', 'enumerate', 'zip', 'map', 'filter', 
+                   'sorted', 'sum', 'max', 'min', 'abs', 'round', 'isinstance', 
+                   'hasattr', 'getattr', 'setattr', 'open', 'input', 'int', 
+                   'float', 'str', 'list', 'dict', 'set', 'tuple', 'bool',
+                   'type', 'dir', 'help', 'exec', 'eval', 'compile', 'globals',
+                   'locals', 'vars', 'iter', 'next', 'reversed', 'slice',
+                   'super', 'staticmethod', 'classmethod', 'property']
+        for builtin in builtins:
+            self.add_completion_item(builtin, 'builtin')
+        
+        # Add common modules
+        modules = ['os', 'sys', 'json', 'datetime', 'math', 'random', 'collections',
+                  'itertools', 'functools', 'pathlib', 'typing', 're', 'urllib',
+                  'time', 'copy', 'pickle', 'csv', 'sqlite3', 'logging',
+                  'unittest', 'threading', 'multiprocessing', 'asyncio']
+        for module in modules:
+            self.add_completion_item(module, 'module')
+            
+        # Add Python exceptions
+        exceptions = ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError',
+                     'AttributeError', 'NameError', 'IOError', 'FileNotFoundError',
+                     'ImportError', 'RuntimeError', 'NotImplementedError']
+        for exc in exceptions:
+            self.add_completion_item(exc, 'class')
+    
+    def update_completion_data_from_editor(self):
+        """Update completion data based on current editor content"""
+        if not self.editor_widget:
+            return
+            
+        # Get current editor content
+        content = self.editor_widget.toPlainText()
+        if not content.strip():
+            return
+        
+        # Remove old dynamic items (keep only static ones)
+        self.completion_items = [item for item in self.completion_items 
+                               if item['type'] in ['keyword', 'builtin', 'module', 'class']]
+        
+        # Extract variables, functions, and classes from current code
+        self._extract_variables_from_code(content)
+        self._extract_functions_from_code(content)
+        self._extract_classes_from_code(content)
+        self._extract_imports_from_code(content)
+    
+    def _extract_variables_from_code(self, content):
+        """Extract variable names from the code"""
+        import re
+        
+        # Pattern for variable assignments
+        var_pattern = re.compile(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=', re.MULTILINE)
+        
+        # Pattern for function parameters
+        func_param_pattern = re.compile(r'def\s+\w+\s*\(([^)]*)\)', re.MULTILINE)
+        
+        # Pattern for for loop variables
+        for_pattern = re.compile(r'for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in', re.MULTILINE)
+        
+        # Pattern for with statement variables
+        with_pattern = re.compile(r'with\s+[^:]+\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*)', re.MULTILINE)
+        
+        variables = set()
+        
+        # Extract assignment variables
+        for match in var_pattern.finditer(content):
+            var_name = match.group(1)
+            if not keyword.iskeyword(var_name):
+                variables.add(var_name)
+        
+        # Extract function parameters
+        for match in func_param_pattern.finditer(content):
+            params = match.group(1).split(',')
+            for param in params:
+                param = param.strip().split('=')[0].strip().split(':')[0].strip()
+                if param and param != 'self' and not keyword.iskeyword(param):
+                    variables.add(param)
+        
+        # Extract for loop variables
+        for match in for_pattern.finditer(content):
+            var_name = match.group(1)
+            if not keyword.iskeyword(var_name):
+                variables.add(var_name)
+        
+        # Extract with statement variables
+        for match in with_pattern.finditer(content):
+            var_name = match.group(1)
+            if not keyword.iskeyword(var_name):
+                variables.add(var_name)
+        
+        # Add variables to completion items
+        for var in variables:
+            self.add_completion_item(var, 'variable')
+    
+    def _extract_functions_from_code(self, content):
+        """Extract function names from the code"""
+        import re
+        
+        # Pattern for function definitions
+        func_pattern = re.compile(r'^\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', re.MULTILINE)
+        
+        for match in func_pattern.finditer(content):
+            func_name = match.group(1)
+            if not keyword.iskeyword(func_name):
+                self.add_completion_item(func_name, 'function')
+    
+    def _extract_classes_from_code(self, content):
+        """Extract class names from the code"""
+        import re
+        
+        # Pattern for class definitions
+        class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)', re.MULTILINE)
+        
+        for match in class_pattern.finditer(content):
+            class_name = match.group(1)
+            if not keyword.iskeyword(class_name):
+                self.add_completion_item(class_name, 'class')
+    
+    def _extract_imports_from_code(self, content):
+        """Extract imported modules and names from the code"""
+        import re
+        
+        # Pattern for import statements
+        import_pattern = re.compile(r'^\s*import\s+([a-zA-Z_][a-zA-Z0-9_.]*)', re.MULTILINE)
+        from_import_pattern = re.compile(r'^\s*from\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+import\s+([^#\n]+)', re.MULTILINE)
+        
+        # Extract direct imports
+        for match in import_pattern.finditer(content):
+            module_name = match.group(1)
+            # Add the module and its components
+            parts = module_name.split('.')
+            for part in parts:
+                if not keyword.iskeyword(part):
+                    self.add_completion_item(part, 'module')
+        
+        # Extract from imports
+        for match in from_import_pattern.finditer(content):
+            module_name = match.group(1)
+            imported_items = match.group(2)
+            
+            # Add the module
+            if not keyword.iskeyword(module_name):
+                self.add_completion_item(module_name, 'module')
+            
+            # Add imported items
+            for item in imported_items.split(','):
+                item = item.strip().split(' as ')[0].strip()
+                if item and item != '*' and not keyword.iskeyword(item):
+                    # Try to determine if it's a function, class, or variable
+                    if item[0].isupper():
+                        self.add_completion_item(item, 'class')
+                    elif item.endswith('()'):
+                        self.add_completion_item(item[:-2], 'function')
+                    else:
+                        self.add_completion_item(item, 'variable')
+            
+    def add_completion_item(self, text, item_type):
+        """Add a completion item"""
+        type_info = self.COMPLETION_TYPES.get(item_type, self.COMPLETION_TYPES['variable'])
+        item = {
+            'text': text,
+            'type': item_type,
+            'color': type_info['color'],
+            'prefix': type_info['prefix']
+        }
+        self.completion_items.append(item)
+        
+    def show_completions(self, prefix):
+        """Show completions for the given prefix"""
+        # Update completion data from current editor content
+        self.update_completion_data_from_editor()
+        
+        self.current_prefix = prefix.lower()
+        self.filtered_items = []
+        
+        # Filter items based on prefix
+        for item in self.completion_items:
+            if item['text'].lower().startswith(self.current_prefix):
+                self.filtered_items.append(item)
+                
+        # Sort by relevance and type priority
+        def sort_key(item):
+            type_priority = {
+                'keyword': 1,
+                'builtin': 2,
+                'function': 3,
+                'class': 4,
+                'variable': 5,
+                'module': 6,
+                'attribute': 7,
+                'constant': 8,
+                'parameter': 9,
+                'import': 10,
+                'snippet': 11
+            }
+            exact_match = item['text'].lower() == self.current_prefix
+            starts_with = item['text'].lower().startswith(self.current_prefix)
+            return (not exact_match, not starts_with, type_priority.get(item['type'], 99), item['text'].lower())
+        
+        self.filtered_items.sort(key=sort_key)
+        
+        # Limit to reasonable number
+        self.filtered_items = self.filtered_items[:25]
+        
+        if self.filtered_items:
+            self.update_list()
+            self.selected_index = 0
+            self.highlight_selected()
+            self.show()
+            return True
+        else:
+            self.hide()
+            return False
+            
+    def update_list(self):
+        """Update the list widget with filtered items"""
+        self.completion_list.clear()
+        
+        for item in self.filtered_items:
+            # Create enhanced display text with type and description
+            type_prefix = item['prefix']
+            item_name = item['text']
+            item_type = item['type'].title()
+            
+            # Create descriptive display text
+            if item['type'] == 'keyword':
+                display_text = f"[{type_prefix}] {item_name} - Python keyword"
+            elif item['type'] == 'builtin':
+                display_text = f"[{type_prefix}] {item_name} - Built-in function"
+            elif item['type'] == 'function':
+                display_text = f"[{type_prefix}] {item_name}() - User function"
+            elif item['type'] == 'class':
+                display_text = f"[{type_prefix}] {item_name} - Class"
+            elif item['type'] == 'variable':
+                display_text = f"[{type_prefix}] {item_name} - Variable"
+            elif item['type'] == 'module':
+                display_text = f"[{type_prefix}] {item_name} - Module"
+            elif item['type'] == 'attribute':
+                display_text = f"[{type_prefix}] {item_name} - Attribute"
+            elif item['type'] == 'parameter':
+                display_text = f"[{type_prefix}] {item_name} - Parameter"
+            elif item['type'] == 'constant':
+                display_text = f"[{type_prefix}] {item_name} - Constant"
+            else:
+                display_text = f"[{type_prefix}] {item_name}"
+            
+            list_item = QtWidgets.QListWidgetItem(display_text)
+            
+            # Set color based on type
+            list_item.setForeground(QtGui.QColor(item['color']))
+            
+            # Add tooltip with more information
+            if item['type'] == 'function':
+                list_item.setToolTip(f"Function: {item_name}\nType: User-defined function")
+            elif item['type'] == 'variable':
+                list_item.setToolTip(f"Variable: {item_name}\nType: Local variable from current code")
+            elif item['type'] == 'class':
+                list_item.setToolTip(f"Class: {item_name}\nType: Class definition")
+            elif item['type'] == 'keyword':
+                list_item.setToolTip(f"Keyword: {item_name}\nType: Python reserved word")
+            elif item['type'] == 'builtin':
+                list_item.setToolTip(f"Built-in: {item_name}\nType: Python built-in function")
+            elif item['type'] == 'module':
+                list_item.setToolTip(f"Module: {item_name}\nType: Python module")
+            else:
+                list_item.setToolTip(f"{item_type}: {item_name}")
+            
+            self.completion_list.addItem(list_item)
+    
+    def highlight_selected(self):
+        """Highlight the currently selected item"""
+        if 0 <= self.selected_index < len(self.filtered_items):
+            self.completion_list.setCurrentRow(self.selected_index)
+    
+    def select_next(self):
+        """Select next completion item"""
+        if self.filtered_items:
+            self.selected_index = (self.selected_index + 1) % len(self.filtered_items)
+            self.highlight_selected()
+    
+    def select_previous(self):
+        """Select previous completion item"""
+        if self.filtered_items:
+            self.selected_index = (self.selected_index - 1) % len(self.filtered_items)
+            self.highlight_selected()
+    
+    def get_selected_completion(self):
+        """Get the currently selected completion text"""
+        if 0 <= self.selected_index < len(self.filtered_items):
+            return self.filtered_items[self.selected_index]['text']
+        return None
+    
+    def on_item_selected(self, item):
+        """Handle item selection"""
+        if item:
+            # Extract the actual completion text from the display text
+            display_text = item.text()
+            
+            # Find the corresponding completion item by matching the text
+            for i, comp_item in enumerate(self.filtered_items):
+                # Check if this item matches by looking for the item name in the display text
+                if comp_item['text'] in display_text and display_text.startswith(f"[{comp_item['prefix']}] {comp_item['text']}"):
+                    self.selected_index = i
+                    self.completion_selected.emit(comp_item['text'])
+                    self.hide()
+                    break
+    
+    def keyPressEvent(self, event):
+        """Handle key press events"""
+        if event.key() == QtCore.Qt.Key.Key_Up:
+            self.select_previous()
+            event.accept()
+        elif event.key() == QtCore.Qt.Key.Key_Down:
+            self.select_next()
+            event.accept()
+        elif event.key() in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter, QtCore.Qt.Key.Key_Tab):
+            selected = self.get_selected_completion()
+            if selected:
+                self.completion_selected.emit(selected)
+            self.hide()
+            event.accept()
+        elif event.key() == QtCore.Qt.Key.Key_Escape:
+            self.hide()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+
 class AdvancedCodeCompleter(QtWidgets.QCompleter):
     """
     Professional IDE-style code completer with advanced features:
@@ -3796,51 +4425,6 @@ class AdvancedCodeCompleter(QtWidgets.QCompleter):
         self.setWrapAround(False)
         self.setMaxVisibleItems(15)
         self.setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
-        
-        # Advanced caching system
-        self.module_cache = {}
-        self.type_cache = {}
-        self.function_signatures = {}
-        self.documentation_cache = {}
-        
-        # Context analysis state
-        self.current_context = {}
-        self.local_scope = {}
-        self.import_scope = set()
-        
-        # Code snippets for common patterns
-        self.code_snippets = {
-            'ifmain': 'if __name__ == "__main__":\n    ${cursor}',
-            'tryexcept': 'try:\n    ${cursor}\nexcept Exception as e:\n    pass',
-            'defclass': 'class ${ClassName}:\n    def __init__(self):\n        ${cursor}',
-            'defmethod': 'def ${method_name}(self, ${params}):\n    """${docstring}"""\n    ${cursor}',
-            'deffunction': 'def ${function_name}(${params}):\n    """${docstring}"""\n    ${cursor}',
-            'forloop': 'for ${item} in ${iterable}:\n    ${cursor}',
-            'whileloop': 'while ${condition}:\n    ${cursor}',
-            'withopen': 'with open(${filename}, ${mode}) as ${file}:\n    ${cursor}',
-            'listcomp': '[${expression} for ${item} in ${iterable}]',
-            'dictcomp': '{${key}: ${value} for ${item} in ${iterable}}',
-            'setcomp': '{${expression} for ${item} in ${iterable}}',
-            'genexp': '(${expression} for ${item} in ${iterable})',
-            'lambda': 'lambda ${params}: ${expression}',
-            'property': '@property\ndef ${name}(self):\n    """${docstring}"""\n    return self._${name}',
-            'staticmethod': '@staticmethod\ndef ${name}(${params}):\n    """${docstring}"""\n    ${cursor}',
-            'classmethod': '@classmethod\ndef ${name}(cls, ${params}):\n    """${docstring}"""\n    ${cursor}',
-            'dataclass': '@dataclass\nclass ${ClassName}:\n    ${field}: ${type}',
-            'async_def': 'async def ${function_name}(${params}):\n    """${docstring}"""\n    ${cursor}',
-            'await': 'await ${expression}',
-            'typing_import': 'from typing import ${types}',
-            'pathlib': 'from pathlib import Path',
-            'datetime': 'from datetime import datetime, date, time'
-        }
-        
-        # Initialize completion system
-        self.initialize_completion_data()
-        self.setup_advanced_popup()
-        
-        # Connect signals
-        self.activated.connect(self.insert_completion)
-        self.highlighted.connect(self.show_completion_tooltip)
     
     def initialize_completion_data(self):
         """Initialize the comprehensive completion database"""
@@ -4797,9 +5381,14 @@ class Pythonico(QtWidgets.QMainWindow):
         # If selected tab then change to its title and filename
         self.tab_widget.currentChanged.connect(self.update_current_file)
 
-        # Create the plain text editor widget
+        # Create the plain text editor widget with bottom completer
         editor_widget = QtWidgets.QWidget()
-        editor_layout = QtWidgets.QHBoxLayout(editor_widget)
+        editor_layout = QtWidgets.QVBoxLayout(editor_widget)
+        
+        # Create horizontal layout for editor and line numbers
+        editor_horizontal = QtWidgets.QWidget()
+        editor_horizontal_layout = QtWidgets.QHBoxLayout(editor_horizontal)
+        
         self.editor = QtWidgets.QPlainTextEdit()
         self.editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
         
@@ -4807,9 +5396,21 @@ class Pythonico(QtWidgets.QMainWindow):
         self.line_count = LineCountWidget(self.editor)
         self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        # Add LineCountWidget to the editor layout
-        editor_layout.addWidget(self.line_count)
-        editor_layout.addWidget(self.editor)
+        # Add LineCountWidget to the editor horizontal layout
+        editor_horizontal_layout.addWidget(self.line_count)
+        editor_horizontal_layout.addWidget(self.editor)
+        
+        # Create bottom code completer
+        self.bottom_completer = BottomCodeCompleter()
+        self.bottom_completer.set_editor(self.editor)
+        
+        # Apply editor settings to completer
+        editor_settings = self.settings_manager.get_category("editor")
+        self.apply_completer_settings(self.bottom_completer, editor_settings)
+        
+        # Add to vertical layout: editor on top, completer at bottom
+        editor_layout.addWidget(editor_horizontal)
+        editor_layout.addWidget(self.bottom_completer)
         
         self.claude_ai_widget = ClaudeAIWidget(self.settings_manager)
 
@@ -4841,7 +5442,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.filters[tab_index] = auto_indent_filter
         self.editor.installEventFilter(auto_indent_filter)
 
-        self.completers[tab_index] = self.completer
+        self.completers[tab_index] = self.bottom_completer
 
         main_splitter.addWidget(self.tab_widget)
 
@@ -4886,14 +5487,12 @@ class Pythonico(QtWidgets.QMainWindow):
         self.filter = AutoIndentFilter(self.editor)
         self.editor.installEventFilter(self.filter)
         
-        self.completer = AdvancedCodeCompleter()
-        self.completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
-        self.completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
-        self.completer.setWrapAround(False)
-
-        # Connect the completer to the editor
-        self.completer.setWidget(self.editor)
-        self.editor.textChanged.connect(self.update_completer)
+        # Set up bottom completer with custom completion logic
+        self.completer = self.bottom_completer  # Keep reference for compatibility
+        
+        # Connect completion signals
+        self.bottom_completer.completion_selected.connect(self.insert_completion)
+        self.editor.textChanged.connect(self.update_bottom_completer)
         
         # add a status bar
         self.status_bar = QtWidgets.QStatusBar()
@@ -5278,11 +5877,15 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create an instance of ClaudeAIWidget with settings
         ai_prompt = ClaudeAIWidget(self.settings_manager)
 
-        # Create a layout for the new tab with split view support
+        # Create a layout for the new tab with bottom completer
         editor_widget = QtWidgets.QWidget()
         editor_layout = QtWidgets.QHBoxLayout(editor_widget)
         
-        # Create main editor splitter for split view functionality
+        # Create left side with editor and bottom completer
+        left_side_widget = QtWidgets.QWidget()
+        left_side_layout = QtWidgets.QVBoxLayout(left_side_widget)
+        
+        # Create main editor splitter for split view functionality  
         editor_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         
         # Configure initial splitter properties
@@ -5303,7 +5906,7 @@ class Pythonico(QtWidgets.QMainWindow):
             }
         """)
         
-        # Create primary editor area
+        # Create primary editor area with line numbers
         primary_editor_widget = QtWidgets.QWidget()
         primary_layout = QtWidgets.QHBoxLayout(primary_editor_widget)
         primary_layout.setContentsMargins(0, 0, 0, 0)
@@ -5317,8 +5920,20 @@ class Pythonico(QtWidgets.QMainWindow):
         # Add primary editor to splitter
         editor_splitter.addWidget(primary_editor_widget)
         
-        # Add editor splitter and AI prompt to main layout
-        editor_layout.addWidget(editor_splitter)
+        # Create bottom completer for this tab
+        bottom_completer = BottomCodeCompleter()
+        bottom_completer.set_editor(new_editor)
+        
+        # Apply editor settings to the completer
+        editor_settings = self.settings_manager.get_category("editor")
+        self.apply_completer_settings(bottom_completer, editor_settings)
+        
+        # Add editor and completer to left side layout
+        left_side_layout.addWidget(editor_splitter)
+        left_side_layout.addWidget(bottom_completer)
+        
+        # Add left side and AI prompt to main layout
+        editor_layout.addWidget(left_side_widget)
         editor_layout.addWidget(ai_prompt)
 
         # Determine the tab name
@@ -5345,22 +5960,12 @@ class Pythonico(QtWidgets.QMainWindow):
         # Store the splitter for split view functionality
         self.splitters[tab_index] = editor_splitter
 
-        # Set up a code completer for the new editor
-        completer = AdvancedCodeCompleter()
-        completer.setModel(QtCore.QStringListModel(keyword.kwlist + dir(__builtins__)))
-        completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
-        completer.setWrapAround(False)
-        completer.setWidget(new_editor)
-        
-        # Set transient parent for Wayland compatibility
-        popup = completer.popup()
-        if popup and hasattr(popup, 'setParent'):
-            popup.setParent(new_editor.window(), QtCore.Qt.WindowType.Popup)
-        
-        new_editor.textChanged.connect(lambda: self.update_completer_for_editor(new_editor, completer))
+        # Connect bottom completer signals
+        bottom_completer.completion_selected.connect(lambda text: self.insert_completion_for_editor(new_editor, text))
+        new_editor.textChanged.connect(lambda: self.update_bottom_completer_for_editor(new_editor, bottom_completer))
 
         # Store the completer for the new tab
-        self.completers[tab_index] = completer
+        self.completers[tab_index] = bottom_completer
 
         # Set the current tab to the newly created one
         self.tab_widget.setCurrentWidget(editor_widget)
@@ -5370,6 +5975,9 @@ class Pythonico(QtWidgets.QMainWindow):
         
         # Update Line Count Widget
         line_count.update_line_numbers()
+        
+        # Ensure completer width matches editor after layout is complete
+        QtCore.QTimer.singleShot(100, bottom_completer.set_width_to_match_editor)
         
         # Connect signals to update the status bar
         self.editors[tab_index].cursorPositionChanged.connect(self.update_status_bar)
@@ -5389,6 +5997,59 @@ class Pythonico(QtWidgets.QMainWindow):
         word = cursor.selectedText()
         self.completer.setCompletionPrefix(word)
         self.completer.complete()
+    
+    def update_bottom_completer(self):
+        """Update the bottom completer based on current cursor position"""
+        cursor = self.editor.textCursor()
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        word = cursor.selectedText()
+        
+        # Show completions if word has at least 1 character and is alphanumeric
+        if len(word) >= 1 and word.isalnum():
+            if not self.bottom_completer.show_completions(word):
+                self.bottom_completer.hide()
+        else:
+            self.bottom_completer.hide()
+    
+    def update_bottom_completer_for_editor(self, editor, bottom_completer):
+        """Update bottom completer for a specific editor"""
+        cursor = editor.textCursor()
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        word = cursor.selectedText()
+        
+        # Show completions if word has at least 1 character and is alphanumeric
+        if len(word) >= 1 and word.isalnum():
+            if not bottom_completer.show_completions(word):
+                bottom_completer.hide()
+        else:
+            bottom_completer.hide()
+    
+    def insert_completion(self, completion_text):
+        """Insert the selected completion into the editor"""
+        cursor = self.editor.textCursor()
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(completion_text)
+        self.editor.setTextCursor(cursor)
+        self.bottom_completer.hide()
+    
+    def insert_completion_for_editor(self, editor, completion_text):
+        """Insert completion into a specific editor"""
+        cursor = editor.textCursor()
+        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(completion_text)
+        editor.setTextCursor(cursor)
+    
+    def keyPressEvent(self, event):
+        """Handle key press events for completer navigation"""
+        if self.bottom_completer.isVisible():
+            if event.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down, 
+                             QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter, 
+                             QtCore.Qt.Key.Key_Tab, QtCore.Qt.Key.Key_Escape):
+                # Forward completer navigation keys to the completer
+                self.bottom_completer.keyPressEvent(event)
+                return
+        
+        super().keyPressEvent(event)
             
     def update_current_file(self, tab_index):
         self.editor = self.editors.get(tab_index, self.editor)
@@ -5397,6 +6058,12 @@ class Pythonico(QtWidgets.QMainWindow):
             self.setWindowTitle(f"Pythonico - {self.current_file}")
         else:
             self.setWindowTitle("Pythonico")
+        
+        # Ensure the completer for the current tab is properly sized
+        if tab_index in self.completers:
+            completer = self.completers[tab_index]
+            if hasattr(completer, 'set_width_to_match_editor'):
+                QtCore.QTimer.singleShot(50, completer.set_width_to_match_editor)
 
     def openFile(self):
         home_dir = QtCore.QDir.homePath()
@@ -6388,6 +7055,15 @@ class Pythonico(QtWidgets.QMainWindow):
         if hasattr(self, 'editor') and self.editor:
             self.apply_editor_settings(self.editor, editor_settings)
         
+        # Apply settings to completers
+        if hasattr(self, 'bottom_completer') and self.bottom_completer:
+            self.apply_completer_settings(self.bottom_completer, editor_settings)
+        
+        # Apply settings to all tab completers
+        for index, completer in self.completers.items():
+            if hasattr(completer, 'apply_theme'):  # Check if it's a BottomCodeCompleter
+                self.apply_completer_settings(completer, editor_settings)
+        
         # Apply assistant settings to all Claude AI widgets
         assistant_settings = settings.get("assistant", {})
         for i in range(self.tab_widget.count()):
@@ -6435,6 +7111,25 @@ class Pythonico(QtWidgets.QMainWindow):
         # Theme/Colors
         theme = settings.get("theme", "Tokyo Night Day")
         self.apply_theme_to_editor(editor, theme)
+    
+    def apply_completer_settings(self, completer, settings):
+        """Apply editor settings to a completer widget"""
+        if not completer:
+            return
+        
+        # Font settings
+        font_family = settings.get("font_family", "Monospace")
+        font_size = settings.get("font_size", 11)
+        font = QtGui.QFont(font_family)
+        font.setPointSize(font_size)
+        completer.apply_editor_font(font)
+        
+        # Theme
+        theme = settings.get("theme", "Tokyo Night Day")
+        completer.apply_theme(theme)
+        
+        # Width matching
+        completer.set_width_to_match_editor()
     
     def apply_assistant_settings(self, claude_widget, settings):
         """Apply settings to a Claude AI widget"""
