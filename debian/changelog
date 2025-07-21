@@ -1,4 +1,4 @@
-pythonico (1.0.0-1) unstable; urgency=medium
+pythonico (1.0-1) unstable; urgency=medium
 
   * Initial release of Pythonico
   * Modern Python IDE with PyQt6
