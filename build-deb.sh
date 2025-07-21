@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build script for creating Debian package for Pythonico
+# Build script for creating Debian package for Pythonico (Static Build)
 
 set -e
 
@@ -38,11 +38,6 @@ clean_debian() {
     find . -name "*.pyc" -delete 2>/dev/null || true
     find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
     
-    # Clean temporary files
-    echo "- Removing temporary files..."
-    sudo rm -f debian/tmp 2>/dev/null || rm -f debian/tmp
-    sudo rm -rf debian/pythonico.debhelper/ 2>/dev/null || rm -rf debian/pythonico.debhelper/
-    
     echo "Clean complete!"
 }
 
@@ -52,7 +47,7 @@ if [ "$1" = "clean" ]; then
     exit 0
 fi
 
-echo "Building Debian package for Pythonico..."
+echo "Building Debian package for Pythonico (Static Build)..."
 
 # Check if we're in the right directory
 if [ ! -f "pythonico.py" ]; then
@@ -72,7 +67,7 @@ echo "Updating changelog..."
 sed -i "s/Mon, 21 Jul 2025 12:00:00 +0000/$(date -R)/" debian/changelog
 
 # Build the package
-echo "Building package..."
+echo "Building static package..."
 debuild -us -uc -b
 
 echo "Build complete!"
@@ -88,5 +83,7 @@ echo ""
 echo "To remove the package:"
 echo "sudo apt-get remove pythonico"
 echo ""
+echo "This static build includes all dependencies - no additional Python packages needed!"
+echo ""
 echo "To clean build artifacts:"
-echo "./build-deb.sh clean"
+echo "./build-deb-static.sh clean"

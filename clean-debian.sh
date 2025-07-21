@@ -78,6 +78,7 @@ cd - >/dev/null
 echo ""
 echo "Cleaning Python build artifacts:"
 safe_remove "build/" "Python build directory"
+safe_remove "build-venv/" "Python venv build directory"
 safe_remove "dist/" "Python dist directory"
 safe_remove ".pybuild/" "pybuild directory"
 

@@ -6,21 +6,25 @@
 override_dh_auto_clean:
 	dh_auto_clean
 	rm -rf build/
+	rm -rf dist/
 	rm -rf *.egg-info/
+	rm -rf build-venv/
 	find . -name "*.pyc" -delete
 	find . -name "__pycache__" -type d -exec rm -rf {} + || true
 
 override_dh_auto_build:
-	# No build step needed for pure Python
+	# Create temporary virtual environment for build
+	python3 -m venv build-venv
+	build-venv/bin/pip install --upgrade pip setuptools wheel
+	build-venv/bin/pip install PyInstaller
+	build-venv/bin/pip install -r requirements.txt
+	# Build static executable with PyInstaller
+	build-venv/bin/python -m PyInstaller --onefile --windowed --name pythonico pythonico.py
 
 override_dh_auto_install:
-	# Install the main script
+	# Install the static executable
 	install -d debian/pythonico/usr/bin
-	install -m 755 pythonico.py debian/pythonico/usr/bin/pythonico
-	
-	# Install Python module
-	install -d debian/pythonico/usr/lib/python3/dist-packages/pythonico
-	install -m 644 pythonico.py debian/pythonico/usr/lib/python3/dist-packages/pythonico/
+	install -m 755 dist/pythonico debian/pythonico/usr/bin/pythonico
 	
 	# Install desktop file and icon
 	install -d debian/pythonico/usr/share/applications
