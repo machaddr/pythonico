@@ -160,6 +160,20 @@ help: ## Show this help message
 .PHONY: all
 all: clean-build deps build ## Complete build process (clean, install deps, build)
 
+.PHONY: build-deb
+build-deb: clean-debian-quick ## Build Debian package
+	$(call print_header,Building Debian Package)
+	@if [ ! -f "debian/control" ]; then \
+		echo "[ERROR] No debian/control file found. This is not a Debian package project."; \
+		exit 1; \
+	fi
+	@./build-deb.sh
+
+.PHONY: build-deb-clean
+build-deb-clean: clean-debian ## Build Debian package with full clean
+	$(call print_header,Building Debian Package with Full Clean)
+	@./build-deb.sh
+
 .PHONY: build
 build: ## Build the executable using PyInstaller spec file
 	$(call print_header,Building $(PROJECT_NAME))
@@ -461,6 +475,18 @@ clean-build: ## Clean build artifacts
 		rm -rf build; \
 		rm -rf $(DIST_DIR); \
 	fi
+
+.PHONY: clean-debian
+clean-debian: ## Clean Debian packaging artifacts
+	$(call print_status,Cleaning Debian packaging artifacts...)
+	./clean-debian.sh
+
+.PHONY: clean-debian-quick
+clean-debian-quick: ## Quick clean of Debian build files
+	$(call print_status,Quick cleaning Debian artifacts...)
+	@rm -rf debian/pythonico/ debian/.debhelper/ || true
+	@rm -f debian/debhelper-build-stamp debian/files debian/*.substvars debian/*.debhelper.log || true
+	@rm -f ../pythonico_*.deb ../pythonico_*.changes ../pythonico_*.dsc ../pythonico_*.tar.* ../pythonico_*.build* || true
 
 .PHONY: clean-cache
 clean-cache: ## Clean Python cache files

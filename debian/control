@@ -1,0 +1,42 @@
+Source: pythonico
+Section: editors
+Priority: optional
+Maintainer: André Machado <machaddr@falanet.org>
+Build-Depends: debhelper-compat (= 12),
+               dh-python,
+               python3-all,
+               python3-setuptools,
+               python3-pyqt6
+Standards-Version: 4.6.0
+Homepage: https://github.com/machaddr/pythonico
+X-Python3-Version: >= 3.8
+
+Package: pythonico
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3-pyqt6,
+         python3-pyaudio,
+         python3-markdown,
+         python3-pip
+Recommends: python3-dev,
+            build-essential
+Description: A lightweight Python IDE for modern development
+ Pythonico is a modern Python IDE built with PyQt6 that provides:
+ .
+  * Advanced syntax highlighting with Tokyo Night themes
+  * Intelligent auto-completion with contextual suggestions
+  * Integrated Claude AI assistant for code help
+  * Built-in Python terminal and REPL
+  * Project explorer with file management
+  * Advanced debugging capabilities
+  * Split view editing
+  * Find and replace functionality
+  * Customizable themes and fonts
+  * Session management
+ .
+ This IDE is designed for developers who want a lightweight yet feature-rich
+ Python development environment with modern UI and AI assistance.
+ .
+ Note: For full functionality, some optional dependencies need to be installed
+ manually via pip: anthropic, speechrecognition, pyqtconsole

@@ -1,0 +1,16 @@
+pythonico (1.0.0-1) unstable; urgency=medium
+
+  * Initial release of Pythonico
+  * Modern Python IDE with PyQt6
+  * Features include:
+    - Advanced syntax highlighting
+    - Intelligent auto-completion
+    - Integrated Claude AI assistant
+    - Built-in Python terminal
+    - Project explorer
+    - Advanced debugging
+    - Split view editing
+    - Customizable themes
+    - Session management
+
+ -- Your Name <machaddr@falanet.org>  Mon, 21 Jul 2025 12:36:21 +0100

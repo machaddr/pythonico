@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pythonico
+Comment=A lightweight Python IDE for modern development
+Exec=pythonico
+Icon=pythonico
+Terminal=false
+Categories=Development;IDE;TextEditor;
+Keywords=python;ide;editor;development;programming;
+StartupNotify=true
+MimeType=text/x-python;application/x-python;

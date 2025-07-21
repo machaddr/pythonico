@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf build/
+	rm -rf *.egg-info/
+	find . -name "*.pyc" -delete
+	find . -name "__pycache__" -type d -exec rm -rf {} + || true
+
+override_dh_auto_build:
+	# No build step needed for pure Python
+
+override_dh_auto_install:
+	# Install the main script
+	install -d debian/pythonico/usr/bin
+	install -m 755 pythonico.py debian/pythonico/usr/bin/pythonico
+	
+	# Install Python module
+	install -d debian/pythonico/usr/lib/python3/dist-packages/pythonico
+	install -m 644 pythonico.py debian/pythonico/usr/lib/python3/dist-packages/pythonico/
+	
+	# Install desktop file and icon
+	install -d debian/pythonico/usr/share/applications
+	install -m 644 debian/pythonico.desktop debian/pythonico/usr/share/applications/
+	
+	install -d debian/pythonico/usr/share/icons/hicolor/256x256/apps
+	install -m 644 icons/main.png debian/pythonico/usr/share/icons/hicolor/256x256/apps/pythonico.png
+	
+	# Install documentation
+	install -d debian/pythonico/usr/share/doc/pythonico
+	install -m 644 README.md debian/pythonico/usr/share/doc/pythonico/
+	install -m 644 LICENSE debian/pythonico/usr/share/doc/pythonico/copyright
+
+override_dh_installdocs:
+	dh_installdocs README.md
+
+override_dh_installchangelogs:
+	dh_installchangelogs
+
+.PHONY: override_dh_auto_clean override_dh_auto_build override_dh_auto_install
