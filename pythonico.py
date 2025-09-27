@@ -1542,52 +1542,58 @@ class AdvancedPythonSyntaxHighlighter(QtGui.QSyntaxHighlighter):
         self.highlighting_rules.append(rule)
     
     def highlightBlock(self, text):
-        """
-        Advanced highlight block with Tokyo Night theme and multi-line support
-        """
-        # Clear any previous formatting
-        self.setCurrentBlockState(0)
-        
-        # Handle multi-line strings first (highest priority)
-        self._highlight_multiline_strings(text)
-        
-        # Apply all syntax highlighting rules
-        for pattern, format_obj in self.highlighting_rules:
-            expression = pattern.globalMatch(text)
-            while expression.hasNext():
-                match = expression.next()
-                start = match.capturedStart()
-                length = match.capturedLength()
-                
-                # Only apply if not already formatted as string/comment
-                current_format = self.format(start)
-                if (current_format.foreground().color() != QtGui.QColor(self.colors['string']) and
-                    current_format.foreground().color() != QtGui.QColor(self.colors['docstring']) and
-                    current_format.foreground().color() != QtGui.QColor(self.colors['comment'])):
-                    self.setFormat(start, length, format_obj)
-        
-        # Apply advanced string highlighting
-        self._highlight_advanced_strings(text)
-        
-        # Apply enhanced bracket matching
-        self._highlight_bracket_pairs(text)
-        
-        # Apply import validation
-        self._highlight_import_validation(text)
+        """Simple, stable highlighting to avoid recursion issues"""
+        try:
+            # Apply basic syntax highlighting rules only
+            for pattern, format_obj in self.highlighting_rules:
+                try:
+                    expression = pattern.globalMatch(text)
+                    while expression.hasNext():
+                        match = expression.next()
+                        start = match.capturedStart()
+                        length = match.capturedLength()
+                        self.setFormat(start, length, format_obj)
+                except:
+                    # Skip any problematic patterns
+                    continue
+                    
+            # Simple string highlighting
+            self._highlight_simple_strings(text)
+            
+        except Exception:
+            # If any error occurs, skip highlighting for this block
+            pass
     
-    def _highlight_multiline_strings(self, text):
-        """Handle multi-line string highlighting with state tracking"""
-        # Triple double quotes
-        self._process_multiline_quotes(text, '"""', self.multiline_quote_states['triple_double'], self.docstring_format)
-        # Triple single quotes
-        self._process_multiline_quotes(text, "'''", self.multiline_quote_states['triple_single'], self.docstring_format)
+    def _highlight_simple_strings(self, text):
+        """Simple string highlighting without complex multiline handling"""
+        try:
+            # Single quoted strings
+            pattern = re.compile(r"'([^'\\]|\\.)*'")
+            for match in pattern.finditer(text):
+                start, end = match.span()
+                self.setFormat(start, end - start, self.string_format)
+            
+            # Double quoted strings
+            pattern = re.compile(r'"([^"\\\\]|\\\\.)*"')
+            for match in pattern.finditer(text):
+                start, end = match.span()
+                self.setFormat(start, end - start, self.string_format)
+                
+            # Comments
+            pattern = re.compile(r'#[^\n]*')
+            for match in pattern.finditer(text):
+                start, end = match.span()
+                self.setFormat(start, end - start, self.comment_format)
+                
+        except Exception:
+            # Skip if any regex issues
+            pass
     
     def _process_multiline_quotes(self, text, delimiter, state_value, format_obj):
-        """Process multi-line quoted strings"""
         start_index = 0
         
         # Check if we're continuing a multi-line string
-        if self.previousBlockState() == state_value:
+        if False:  # self.previousBlockState() == state_value:
             # Look for the closing delimiter
             end_index = text.find(delimiter)
             if end_index >= 0:
@@ -1620,13 +1626,9 @@ class AdvancedPythonSyntaxHighlighter(QtGui.QSyntaxHighlighter):
                 start_index = end_match + len(delimiter)
     
     def _highlight_advanced_strings(self, text):
-        """Advanced string highlighting with f-string expression support"""
-        # Skip if already in multi-line string
-        if self.currentBlockState() != 0:
-            return
-            
-        # F-strings with expression highlighting
-        self._highlight_fstrings(text)
+        """Disabled to prevent recursion issues"""
+        return
+        # DISABLED: Complex string highlighting
         
         # Raw strings
         for pattern in [r'r"[^"\\]*(?:\\.[^"\\]*)*"', r"r'[^'\\]*(?:\\.[^'\\]*)*'"]:
@@ -2010,7 +2012,6 @@ class PythonSyntaxHighlighter(QtGui.QSyntaxHighlighter):
     def highlightBlock(self, text):
         """Apply syntax highlighting to a block of text"""
         for pattern, format in self.highlighting_rules:
-            import re
             for match in re.finditer(pattern, text):
                 start, end = match.span()
                 self.setFormat(start, end - start, format)
@@ -3787,6 +3788,7 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         self.current_prefix = ""
         self.selected_index = 0
         self.current_theme = "Tokyo Night Day"  # Default theme
+        self.inserting_completion = False  # Flag to prevent recursive completions
         
         self.init_ui()
         self.init_completion_data()
@@ -3919,7 +3921,6 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         # Update styling with font size
         current_style = self.completion_list.styleSheet()
         # Remove any existing font-size declarations and add the new one
-        import re
         style_without_font_size = re.sub(r'font-size:\s*\d+px;', '', current_style)
         new_style = style_without_font_size.replace(
             'font-family:', f'font-size: {font.pointSize()}px; font-family:'
@@ -4081,13 +4082,15 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         for exc in exceptions:
             self.add_completion_item(exc, 'class')
     
-    def update_completion_data_from_editor(self):
+    def update_completion_data_from_editor(self, editor=None):
         """Update completion data based on current editor content"""
-        if not self.editor_widget:
+        # Use the provided editor or fall back to the default editor widget
+        target_editor = editor if editor is not None else self.editor_widget
+        if not target_editor:
             return
             
         # Get current editor content
-        content = self.editor_widget.toPlainText()
+        content = target_editor.toPlainText()
         if not content.strip():
             return
         
@@ -4103,19 +4106,42 @@ class BottomCodeCompleter(QtWidgets.QWidget):
     
     def _extract_variables_from_code(self, content):
         """Extract variable names from the code"""
-        import re
+        # Use pre-compiled patterns to avoid runtime compilation issues
+        if not hasattr(self, '_var_patterns'):
+            # Compile patterns once and store them
+            try:
+                self._var_patterns = {
+                    'var': re.compile(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=', re.M),
+                    'func_param': re.compile(r'def\s+\w+\s*\(([^)]*)\)', re.M),
+                    'for_loop': re.compile(r'for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in', re.M),
+                    'with_stmt': re.compile(r'with\s+[^:]+\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*)', re.M)
+                }
+            except:
+                # Fallback to simple string matching if regex fails
+                self._use_simple_parsing = True
+                return
         
-        # Pattern for variable assignments
-        var_pattern = re.compile(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=', re.MULTILINE)
+        if hasattr(self, '_use_simple_parsing'):
+            # Simple fallback parsing without regex
+            lines = content.split('\n')
+            variables = set()
+            for line in lines:
+                line = line.strip()
+                if '=' in line and not line.startswith('#'):
+                    parts = line.split('=', 1)
+                    if len(parts) == 2:
+                        var_name = parts[0].strip()
+                        if var_name.isidentifier() and not keyword.iskeyword(var_name):
+                            variables.add(var_name)
+            
+            for var in variables:
+                self.add_completion_item(var, 'variable')
+            return
         
-        # Pattern for function parameters
-        func_param_pattern = re.compile(r'def\s+\w+\s*\(([^)]*)\)', re.MULTILINE)
-        
-        # Pattern for for loop variables
-        for_pattern = re.compile(r'for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in', re.MULTILINE)
-        
-        # Pattern for with statement variables
-        with_pattern = re.compile(r'with\s+[^:]+\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*)', re.MULTILINE)
+        var_pattern = self._var_patterns['var']
+        func_param_pattern = self._var_patterns['func_param']
+        for_pattern = self._var_patterns['for_loop']
+        with_pattern = self._var_patterns['with_stmt']
         
         variables = set()
         
@@ -4151,65 +4177,81 @@ class BottomCodeCompleter(QtWidgets.QWidget):
     
     def _extract_functions_from_code(self, content):
         """Extract function names from the code"""
-        import re
-        
-        # Pattern for function definitions
-        func_pattern = re.compile(r'^\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', re.MULTILINE)
-        
-        for match in func_pattern.finditer(content):
-            func_name = match.group(1)
-            if not keyword.iskeyword(func_name):
-                self.add_completion_item(func_name, 'function')
+        # Use simple parsing to avoid regex issues
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('def ') and '(' in line:
+                func_name = line[4:line.find('(')].strip()
+                if func_name.isidentifier() and not keyword.iskeyword(func_name):
+                    self.add_completion_item(func_name, 'function')
+        return
     
     def _extract_classes_from_code(self, content):
         """Extract class names from the code"""
-        import re
-        
-        # Pattern for class definitions
-        class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)', re.MULTILINE)
-        
-        for match in class_pattern.finditer(content):
-            class_name = match.group(1)
-            if not keyword.iskeyword(class_name):
-                self.add_completion_item(class_name, 'class')
+        # Use simple parsing to avoid regex issues
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('class '):
+                # Find class name after 'class '
+                class_part = line[6:].strip()
+                if '(' in class_part:
+                    class_name = class_part[:class_part.find('(')].strip()
+                elif ':' in class_part:
+                    class_name = class_part[:class_part.find(':')].strip()
+                else:
+                    class_name = class_part.strip()
+                
+                if class_name.isidentifier() and not keyword.iskeyword(class_name):
+                    self.add_completion_item(class_name, 'class')
+        return
     
     def _extract_imports_from_code(self, content):
         """Extract imported modules and names from the code"""
-        import re
-        
-        # Pattern for import statements
-        import_pattern = re.compile(r'^\s*import\s+([a-zA-Z_][a-zA-Z0-9_.]*)', re.MULTILINE)
-        from_import_pattern = re.compile(r'^\s*from\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+import\s+([^#\n]+)', re.MULTILINE)
-        
-        # Extract direct imports
-        for match in import_pattern.finditer(content):
-            module_name = match.group(1)
-            # Add the module and its components
-            parts = module_name.split('.')
-            for part in parts:
-                if not keyword.iskeyword(part):
-                    self.add_completion_item(part, 'module')
-        
-        # Extract from imports
-        for match in from_import_pattern.finditer(content):
-            module_name = match.group(1)
-            imported_items = match.group(2)
-            
-            # Add the module
-            if not keyword.iskeyword(module_name):
-                self.add_completion_item(module_name, 'module')
-            
-            # Add imported items
-            for item in imported_items.split(','):
-                item = item.strip().split(' as ')[0].strip()
-                if item and item != '*' and not keyword.iskeyword(item):
-                    # Try to determine if it's a function, class, or variable
-                    if item[0].isupper():
-                        self.add_completion_item(item, 'class')
-                    elif item.endswith('()'):
-                        self.add_completion_item(item[:-2], 'function')
-                    else:
-                        self.add_completion_item(item, 'variable')
+        # Use simple parsing to avoid regex issues
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('import ') and not line.startswith('#'):
+                # Handle 'import module' statements
+                import_part = line[7:].strip()
+                if '#' in import_part:
+                    import_part = import_part[:import_part.find('#')].strip()
+                
+                modules = import_part.split(',')
+                for module in modules:
+                    module = module.strip()
+                    if module and '.' in module:
+                        parts = module.split('.')
+                        for part in parts:
+                            if part.isidentifier():
+                                self.add_completion_item(part, 'module')
+                    elif module.isidentifier():
+                        self.add_completion_item(module, 'module')
+                        
+            elif line.startswith('from ') and ' import ' in line and not line.startswith('#'):
+                # Handle 'from module import name' statements
+                try:
+                    from_part, import_part = line[5:].split(' import ', 1)
+                    from_part = from_part.strip()
+                    import_part = import_part.strip()
+                    
+                    if '#' in import_part:
+                        import_part = import_part[:import_part.find('#')].strip()
+                    
+                    # Add the module being imported from
+                    if from_part.isidentifier():
+                        self.add_completion_item(from_part, 'module')
+                    
+                    # Add the imported names
+                    imports = import_part.split(',')
+                    for imp in imports:
+                        imp = imp.strip()
+                        if imp.isidentifier() and not keyword.iskeyword(imp):
+                            self.add_completion_item(imp, 'import')
+                except:
+                    pass
             
     def add_completion_item(self, text, item_type):
         """Add a completion item"""
@@ -4222,10 +4264,10 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         }
         self.completion_items.append(item)
         
-    def show_completions(self, prefix):
+    def show_completions(self, prefix, editor=None):
         """Show completions for the given prefix"""
         # Update completion data from current editor content
-        self.update_completion_data_from_editor()
+        self.update_completion_data_from_editor(editor)
         
         self.current_prefix = prefix.lower()
         self.filtered_items = []
@@ -4668,7 +4710,7 @@ class AdvancedCodeCompleter(QtWidgets.QCompleter):
     def extract_imports(self, text):
         """Extract imported modules and their aliases"""
         imports = set()
-        import_pattern = re.compile(r'^\s*(?:from\s+(\S+)\s+)?import\s+(.+)', re.MULTILINE)
+        import_pattern = re.compile(r'^\s*(?:from\s+(\S+)\s+)?import\s+(.+)', 8)
         
         for match in import_pattern.finditer(text):
             module, items = match.groups()
@@ -4686,7 +4728,7 @@ class AdvancedCodeCompleter(QtWidgets.QCompleter):
     def extract_functions(self, text):
         """Extract function definitions"""
         functions = set()
-        func_pattern = re.compile(r'^\s*def\s+([a-zA-Z_]\w*)\s*\(', re.MULTILINE)
+        func_pattern = re.compile(r'^\s*def\s+([a-zA-Z_]\w*)\s*\(', 8)
         
         for match in func_pattern.finditer(text):
             functions.add(match.group(1))
@@ -4696,7 +4738,7 @@ class AdvancedCodeCompleter(QtWidgets.QCompleter):
     def extract_classes(self, text):
         """Extract class definitions"""
         classes = set()
-        class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_]\w*)', re.MULTILINE)
+        class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_]\w*)', 8)
         
         for match in class_pattern.finditer(text):
             classes.add(match.group(1))
@@ -6045,13 +6087,24 @@ class Pythonico(QtWidgets.QMainWindow):
     
     def update_bottom_completer(self):
         """Update the bottom completer based on current cursor position"""
+        # Skip if we're currently syncing to prevent recursion
+        current_index = self.tab_widget.currentIndex()
+        if (hasattr(self, '_syncing_editors') and current_index is not None 
+            and self._syncing_editors.get(current_index, False)):
+            return
+            
+        # Skip if we're currently inserting a completion
+        if (hasattr(self, 'bottom_completer') and self.bottom_completer 
+            and getattr(self.bottom_completer, 'inserting_completion', False)):
+            return
+            
         cursor = self.editor.textCursor()
         cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
         word = cursor.selectedText()
         
         # Show completions if word has at least 1 character and is alphanumeric
         if len(word) >= 1 and word.isalnum():
-            if not self.bottom_completer.show_completions(word):
+            if not self.bottom_completer.show_completions(word, self.editor):
                 self.bottom_completer.hide()
         else:
             self.bottom_completer.hide()
@@ -6064,25 +6117,189 @@ class Pythonico(QtWidgets.QMainWindow):
         
         # Show completions if word has at least 1 character and is alphanumeric
         if len(word) >= 1 and word.isalnum():
-            if not bottom_completer.show_completions(word):
+            if not bottom_completer.show_completions(word, editor):
                 bottom_completer.hide()
         else:
             bottom_completer.hide()
     
+    def switch_completer_to_editor(self, editor):
+        """Switch the shared completer to work with the specified editor"""
+        if not hasattr(self, 'bottom_completer') or not self.bottom_completer:
+            return
+            
+        try:
+            # Hide completer first
+            self.bottom_completer.hide()
+            
+            # Update completer's editor reference
+            self.bottom_completer.set_editor(editor)
+            
+            # Find the correct container for the completer
+            target_layout = self._find_editor_container_layout(editor)
+            
+            if target_layout:
+                # Remove completer from current parent if it has one
+                current_parent = self.bottom_completer.parent()
+                if current_parent:
+                    if hasattr(current_parent, 'layout') and current_parent.layout():
+                        current_parent.layout().removeWidget(self.bottom_completer)
+                    self.bottom_completer.setParent(None)
+                
+                # Check if completer is already in this layout
+                completer_in_layout = False
+                for i in range(target_layout.count()):
+                    item = target_layout.itemAt(i)
+                    if item and item.widget() == self.bottom_completer:
+                        completer_in_layout = True
+                        break
+                
+                # Add completer to the layout if not already there
+                if not completer_in_layout:
+                    target_layout.addWidget(self.bottom_completer)
+                
+                # Ensure completer width matches the new editor
+                QtCore.QTimer.singleShot(50, self.bottom_completer.set_width_to_match_editor)
+                
+        except Exception as e:
+            print(f"Error switching completer: {e}")
+    
+    def _find_editor_container_layout(self, editor):
+        """Find the layout that should contain the completer for the given editor"""
+        try:
+            # Start from the editor and walk up the widget hierarchy
+            current_widget = editor
+            
+            # Look for the immediate parent container that has a VBoxLayout
+            while current_widget:
+                parent = current_widget.parent()
+                if not parent:
+                    break
+                    
+                # Check if this parent has a VBoxLayout and contains editor-related widgets
+                if hasattr(parent, 'layout') and parent.layout():
+                    layout = parent.layout()
+                    if isinstance(layout, QtWidgets.QVBoxLayout):
+                        # Check if this layout contains our editor (directly or indirectly)
+                        contains_editor = False
+                        for i in range(layout.count()):
+                            item = layout.itemAt(i)
+                            if item and item.widget():
+                                widget = item.widget()
+                                # Check if this widget contains our editor
+                                if self._widget_contains_editor(widget, editor):
+                                    contains_editor = True
+                                    break
+                        
+                        if contains_editor:
+                            return layout
+                
+                current_widget = parent
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def _widget_contains_editor(self, widget, target_editor):
+        """Check if a widget contains the target editor (recursively)"""
+        if widget == target_editor:
+            return True
+            
+        # Check children recursively
+        for child in widget.findChildren(QtWidgets.QWidget):
+            if child == target_editor:
+                return True
+                
+        return False
+    
+    def handle_split_editor_text_change(self, split_editor):
+        """Handle text changes in split editor using shared completer"""
+        try:
+            # Find the tab index for this split editor
+            tab_index = None
+            for idx, editor in self.split_editors.items():
+                if editor == split_editor:
+                    tab_index = idx
+                    break
+            
+            # Skip if we're currently syncing to prevent recursion
+            if (hasattr(self, '_syncing_editors') and tab_index is not None 
+                and self._syncing_editors.get(tab_index, False)):
+                return
+                
+            # Skip if we're currently inserting a completion
+            if (hasattr(self, 'bottom_completer') and self.bottom_completer 
+                and getattr(self.bottom_completer, 'inserting_completion', False)):
+                return
+                
+            # Only update if this split editor has focus and completer exists
+            if (split_editor.hasFocus() and hasattr(self, 'bottom_completer') 
+                and self.bottom_completer):
+                cursor = split_editor.textCursor()
+                cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+                word = cursor.selectedText()
+                
+                # Show completions if word has at least 1 character and is alphanumeric
+                if len(word) >= 1 and word.isalnum():
+                    if not self.bottom_completer.show_completions(word, split_editor):
+                        self.bottom_completer.hide()
+                else:
+                    self.bottom_completer.hide()
+        except Exception as e:
+            # Silently handle any widget-related errors
+            pass
+    
     def insert_completion(self, completion_text):
         """Insert the selected completion into the editor"""
-        cursor = self.editor.textCursor()
-        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
-        cursor.insertText(completion_text)
-        self.editor.setTextCursor(cursor)
-        self.bottom_completer.hide()
+        if not hasattr(self, 'bottom_completer') or not self.bottom_completer:
+            return
+            
+        # Set flag to prevent recursive completions
+        self.bottom_completer.inserting_completion = True
+        
+        try:
+            # Use the editor that the completer is currently associated with
+            target_editor = None
+            if self.bottom_completer.editor_widget:
+                target_editor = self.bottom_completer.editor_widget
+            else:
+                target_editor = self.editor  # Fallback to main editor
+                
+            cursor = target_editor.textCursor()
+            cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+            selected_text = cursor.selectedText()
+            
+            # If the completion text is the same as selected text, just position cursor at end
+            if completion_text == selected_text:
+                # Move cursor to end of the word and clear selection
+                cursor.clearSelection()
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfWord)
+                target_editor.setTextCursor(cursor)
+            else:
+                # Replace the selected text with completion
+                cursor.insertText(completion_text)
+                target_editor.setTextCursor(cursor)
+            self.bottom_completer.hide()
+        finally:
+            # Reset flag after a short delay to allow text change events to process
+            QtCore.QTimer.singleShot(100, lambda: setattr(self.bottom_completer, 'inserting_completion', False))
     
     def insert_completion_for_editor(self, editor, completion_text):
         """Insert completion into a specific editor"""
         cursor = editor.textCursor()
         cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
-        cursor.insertText(completion_text)
-        editor.setTextCursor(cursor)
+        selected_text = cursor.selectedText()
+        
+        # If the completion text is the same as selected text, just position cursor at end
+        if completion_text == selected_text:
+            # Move cursor to end of the word and clear selection
+            cursor.clearSelection()
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfWord)
+            editor.setTextCursor(cursor)
+        else:
+            # Replace the selected text with completion
+            cursor.insertText(completion_text)
+            editor.setTextCursor(cursor)
     
     def keyPressEvent(self, event):
         """Handle key press events for completer navigation"""
@@ -6418,7 +6635,7 @@ class Pythonico(QtWidgets.QMainWindow):
         text = current_editor.toPlainText()
         
         try:
-            pattern = re.compile(search_text, flags | re.MULTILINE)
+            pattern = re.compile(search_text, flags | 8)
             
             if reverse:
                 matches = list(pattern.finditer(text))
@@ -6478,7 +6695,7 @@ class Pythonico(QtWidgets.QMainWindow):
             find_text = r'\b' + find_text + r'\b'
             
         try:
-            pattern = re.compile(find_text, flags | re.MULTILINE)
+            pattern = re.compile(find_text, flags | 8)
             text = current_editor.toPlainText()
             new_text, count = pattern.subn(replace_text, text)
             
@@ -6664,6 +6881,8 @@ class Pythonico(QtWidgets.QMainWindow):
                     del self.split_editors[current_index]
                 if current_index in self.split_highlighters:
                     del self.split_highlighters[current_index]
+                if hasattr(self, '_syncing_editors') and current_index in self._syncing_editors:
+                    del self._syncing_editors[current_index]
                 
                 # Remove the second editor
                 while splitter.count() > 1:
@@ -6696,15 +6915,7 @@ class Pythonico(QtWidgets.QMainWindow):
         # Create line count widget for split editor
         split_line_count = LineCountWidget(split_editor)
         
-        # Create bottom completer for split editor
-        split_bottom_completer = BottomCodeCompleter()
-        split_bottom_completer.set_editor(split_editor)
-        
-        # Apply editor settings to the split completer
-        editor_settings = self.settings_manager.get_category("editor")
-        self.apply_completer_settings(split_bottom_completer, editor_settings)
-        
-        # Create widget to hold split editor, line count, and completer
+        # Create widget to hold split editor and line count (no separate completer)
         split_widget = QtWidgets.QWidget()
         split_layout = QtWidgets.QVBoxLayout(split_widget)
         split_layout.setContentsMargins(0, 0, 0, 0)
@@ -6720,9 +6931,8 @@ class Pythonico(QtWidgets.QMainWindow):
         editor_widget = QtWidgets.QWidget()
         editor_widget.setLayout(editor_layout)
         
-        # Add editor and completer to main layout
+        # Add only the editor to the layout (shared completer will be positioned dynamically)
         split_layout.addWidget(editor_widget)
-        split_layout.addWidget(split_bottom_completer)
         
         # Set minimum size for split widget to match primary editor
         split_widget.setMinimumWidth(200)
@@ -6758,29 +6968,62 @@ class Pythonico(QtWidgets.QMainWindow):
         split_filter = AutoIndentFilter(split_editor)
         split_editor.installEventFilter(split_filter)
         
-        # Connect bottom completer signals for split editor
-        split_bottom_completer.completion_selected.connect(lambda text: self.insert_completion_for_editor(split_editor, text))
-        split_editor.textChanged.connect(lambda: self.update_bottom_completer_for_editor(split_editor, split_bottom_completer))
+        # Store reference to split editor for focus management
+        self.split_editors[tab_index] = split_editor
         
-        # Ensure split completer width matches editor after layout is complete
-        QtCore.QTimer.singleShot(100, split_bottom_completer.set_width_to_match_editor)
+        # Add syncing flag to prevent recursion
+        if not hasattr(self, '_syncing_editors'):
+            self._syncing_editors = {}
+        self._syncing_editors[tab_index] = False
+        
+        # Connect split editor text changes to update the shared completer
+        split_editor.textChanged.connect(lambda: self.handle_split_editor_text_change(split_editor))
+        
+        # Create focus event filter for managing shared completer
+        class FocusEventFilter(QtCore.QObject):
+            def __init__(self, parent_window):
+                super().__init__()
+                self.parent_window = parent_window
+                
+            def eventFilter(self, obj, event):
+                if event.type() == QtCore.QEvent.Type.FocusIn:
+                    if obj == split_editor:
+                        self.parent_window.switch_completer_to_editor(split_editor)
+                    elif obj == current_editor:
+                        self.parent_window.switch_completer_to_editor(current_editor)
+                return super().eventFilter(obj, event)
+        
+        # Install focus event filter
+        focus_filter = FocusEventFilter(self)
+        split_editor.installEventFilter(focus_filter)
+        current_editor.installEventFilter(focus_filter)
         
         # Sync content between main and split editor
         def sync_to_split():
             try:
-                if split_editor is not None and not split_editor.hasFocus():
+                if (split_editor is not None and not split_editor.hasFocus() 
+                    and not self._syncing_editors.get(tab_index, False)):
+                    # Set syncing flag to prevent recursion
+                    self._syncing_editors[tab_index] = True
                     split_editor.setPlainText(current_editor.toPlainText())
+                    self._syncing_editors[tab_index] = False
             except RuntimeError:
                 # Widget has been deleted, disconnect signal
                 current_editor.textChanged.disconnect(sync_to_split)
+                self._syncing_editors[tab_index] = False
         
         def sync_to_main():
             try:
-                if current_editor is not None and not current_editor.hasFocus():
+                if (current_editor is not None and not current_editor.hasFocus() 
+                    and not self._syncing_editors.get(tab_index, False)):
+                    # Set syncing flag to prevent recursion
+                    self._syncing_editors[tab_index] = True
                     current_editor.setPlainText(split_editor.toPlainText())
+                    self._syncing_editors[tab_index] = False
             except RuntimeError:
                 # Widget has been deleted, disconnect signal
                 split_editor.textChanged.disconnect(sync_to_main)
+                self._syncing_editors[tab_index] = False
         
         current_editor.textChanged.connect(sync_to_split)
         split_editor.textChanged.connect(sync_to_main)
