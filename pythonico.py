@@ -5394,24 +5394,13 @@ class Pythonico(QtWidgets.QMainWindow):
         # If selected tab then change to its title and filename
         self.tab_widget.currentChanged.connect(self.update_current_file)
 
-        # Create the plain text editor widget with bottom completer
-        editor_widget = QtWidgets.QWidget()
-        editor_layout = QtWidgets.QVBoxLayout(editor_widget)
-        
-        # Create horizontal layout for editor and line numbers
-        editor_horizontal = QtWidgets.QWidget()
-        editor_horizontal_layout = QtWidgets.QHBoxLayout(editor_horizontal)
-        
+        # Create the plain text editor and related components
         self.editor = QtWidgets.QPlainTextEdit()
         self.editor.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         
         # Create LineCountWidget instance
         self.line_count = LineCountWidget(self.editor)
-        self.editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-
-        # Add LineCountWidget to the editor horizontal layout
-        editor_horizontal_layout.addWidget(self.line_count)
-        editor_horizontal_layout.addWidget(self.editor)
         
         # Create bottom code completer
         self.bottom_completer = BottomCodeCompleter()
@@ -5421,16 +5410,56 @@ class Pythonico(QtWidgets.QMainWindow):
         editor_settings = self.settings_manager.get_category("editor")
         self.apply_completer_settings(self.bottom_completer, editor_settings)
         
-        # Add to vertical layout: editor on top, completer at bottom
-        editor_layout.addWidget(editor_horizontal)
-        editor_layout.addWidget(self.bottom_completer)
-        
         self.claude_ai_widget = ClaudeAIWidget(self.settings_manager)
 
-        # Create a horizontal splitter to separate the editor and AI prompt panel
-        horizontal_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        horizontal_splitter.addWidget(editor_widget)
-        horizontal_splitter.addWidget(self.claude_ai_widget)
+        # Create a layout for the tab (similar to createNewTab structure)
+        tab_widget = QtWidgets.QWidget()
+        tab_layout = QtWidgets.QHBoxLayout(tab_widget)
+        
+        # Create left side with editor and bottom completer
+        left_side_widget = QtWidgets.QWidget()
+        left_side_layout = QtWidgets.QVBoxLayout(left_side_widget)
+        
+        # Create main editor splitter for split view functionality  
+        editor_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        editor_splitter.setHandleWidth(8)
+        editor_splitter.setChildrenCollapsible(False)
+        editor_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #3b4261;
+                border: 1px solid #565f89;
+                border-radius: 3px;
+            }
+            QSplitter::handle:hover {
+                background-color: #414868;
+                border: 1px solid #7aa2f7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #7aa2f7;
+            }
+        """)
+        
+        # Create primary editor area with line numbers (similar to createNewTab)
+        primary_editor_widget = QtWidgets.QWidget()
+        primary_layout = QtWidgets.QHBoxLayout(primary_editor_widget)
+        primary_layout.setContentsMargins(0, 0, 0, 0)
+        primary_layout.addWidget(self.line_count)
+        primary_layout.addWidget(self.editor)
+        
+        # Set minimum size for primary editor
+        primary_editor_widget.setMinimumWidth(200)
+        primary_editor_widget.setMinimumHeight(150)
+        
+        # Add primary editor to splitter
+        editor_splitter.addWidget(primary_editor_widget)
+        
+        # Add editor and completer to left side layout
+        left_side_layout.addWidget(editor_splitter)
+        left_side_layout.addWidget(self.bottom_completer)
+        
+        # Add left side and AI prompt to main layout
+        tab_layout.addWidget(left_side_widget)
+        tab_layout.addWidget(self.claude_ai_widget)
 
         # Initialize the tab widget if not already initialized
         if not hasattr(self, 'tab_widget'):
@@ -5446,7 +5475,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.highlighter = AdvancedPythonSyntaxHighlighter(self.editor.document())
 
         # Add the editor widget to a new tab
-        tab_index = self.tab_widget.addTab(horizontal_splitter, tab_name)
+        tab_index = self.tab_widget.addTab(tab_widget, tab_name)
         
         self.editors[tab_index] = self.editor
         self.highlighters[tab_index] = self.highlighter
@@ -5456,6 +5485,9 @@ class Pythonico(QtWidgets.QMainWindow):
         self.editor.installEventFilter(auto_indent_filter)
 
         self.completers[tab_index] = self.bottom_completer
+        
+        # Store the splitter for split view functionality
+        self.splitters[tab_index] = editor_splitter
 
         main_splitter.addWidget(self.tab_widget)
 
@@ -6692,9 +6724,28 @@ class Pythonico(QtWidgets.QMainWindow):
         split_layout.addWidget(editor_widget)
         split_layout.addWidget(split_bottom_completer)
         
+        # Set minimum size for split widget to match primary editor
+        split_widget.setMinimumWidth(200)
+        split_widget.setMinimumHeight(150)
+        
         # Set orientation and add to splitter
         splitter.setOrientation(orientation)
         splitter.addWidget(split_widget)
+        
+        # Force equal sizes for both panes
+        if orientation == QtCore.Qt.Orientation.Horizontal:
+            # Side by side - split width equally
+            total_width = splitter.size().width() if splitter.size().width() > 0 else 800
+            sizes = [total_width // 2, total_width // 2]
+        else:
+            # Top and bottom - split height equally  
+            total_height = splitter.size().height() if splitter.size().height() > 0 else 600
+            sizes = [total_height // 2, total_height // 2]
+        
+        splitter.setSizes(sizes)
+        
+        # Use a timer to ensure proper sizing after layout updates
+        QtCore.QTimer.singleShot(50, lambda: splitter.setSizes(sizes))
         
         # Set up syntax highlighting for split editor
         split_highlighter = AdvancedPythonSyntaxHighlighter(split_editor.document())
