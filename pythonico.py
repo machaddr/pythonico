@@ -3783,6 +3783,7 @@ class BottomCodeCompleter(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.editor_widget = None
+        self.current_target_editor = None
         self.completion_items = []
         self.filtered_items = []
         self.current_prefix = ""
@@ -3927,20 +3928,61 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         )
         self.completion_list.setStyleSheet(new_style)
     
-    def set_width_to_match_editor(self):
+    def set_width_to_match_editor(self, editor=None):
         """Set the completer width and position to align exactly with the editor text area"""
-        if not self.editor_widget:
+        target_editor = editor or self.editor_widget
+        if not target_editor:
             return
             
+        # Check if we have split editors that need wider completer
+        main_window = self.get_main_window()
+        current_tab_index = -1
+        
+        if main_window:
+            # Find which tab this editor belongs to
+            for tab_idx, editor in main_window.editors.items():
+                if editor == target_editor:
+                    current_tab_index = tab_idx
+                    break
+            if current_tab_index == -1:
+                # Check split editors
+                for tab_idx, split_ed in main_window.split_editors.items():
+                    if split_ed == target_editor:
+                        current_tab_index = tab_idx
+                        break
+            
+            # If we have a horizontal split (side by side), make completer span both editors
+            if current_tab_index >= 0 and current_tab_index in main_window.split_editors:
+                splitter = main_window.splitters.get(current_tab_index)
+                if splitter and splitter.orientation() == QtCore.Qt.Orientation.Horizontal:
+                    # Horizontal split (side by side) - make completer span both editors
+                    main_editor = main_window.editors.get(current_tab_index)
+                    split_ed = main_window.split_editors.get(current_tab_index)
+                    
+                    if main_editor and split_ed:
+                        # Calculate total width of both editors
+                        total_width = self.calculate_total_split_width(main_editor, split_ed, splitter)
+                        self.setFixedWidth(total_width)
+                        
+                        # Center the completer under both editors
+                        layout = self.layout()
+                        if layout:
+                            # Find the splitter position to center the completer
+                            splitter_width = splitter.width()
+                            completer_width = total_width
+                            left_margin = (splitter_width - completer_width) // 2
+                            layout.setContentsMargins(left_margin, 0, 0, 0)
+                        return
+        
         # Find the line count widget associated with our editor
         line_count_widget = None
         
         # Navigate up to find the editor's parent container
-        current_parent = self.editor_widget.parent()
+        current_parent = target_editor.parent()
         while current_parent:
             # Look for LineCountWidget in the same layout as our editor
             for child in current_parent.findChildren(LineCountWidget):
-                if hasattr(child, 'editor') and child.editor == self.editor_widget:
+                if hasattr(child, 'editor') and child.editor == target_editor:
                     line_count_widget = child
                     break
             if line_count_widget:
@@ -3950,12 +3992,12 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         if line_count_widget:
             # Calculate exact positioning to align with editor text content
             line_count_width = line_count_widget.width()
-            editor_width = self.editor_widget.width()
+            editor_width = target_editor.width()
             
             # Account for the scroll bar width to match the complete editor area
             scroll_bar_width = 0
-            if self.editor_widget.verticalScrollBar().isVisible():
-                scroll_bar_width = self.editor_widget.verticalScrollBar().width()
+            if target_editor.verticalScrollBar().isVisible():
+                scroll_bar_width = target_editor.verticalScrollBar().width()
             
             # Set our total width to match the complete editor area including scroll bar
             total_width = line_count_width + editor_width + scroll_bar_width
@@ -3978,12 +4020,12 @@ class BottomCodeCompleter(QtWidgets.QWidget):
                 # Set left margin to align with editor text content
                 left_margin = line_count_width + spacing_adjustment
                 layout.setContentsMargins(left_margin, 0, 0, 0)
-        elif self.editor_widget:
+        elif target_editor:
             # Fallback: match editor width including scroll bar
-            editor_width = self.editor_widget.width()
+            editor_width = target_editor.width()
             scroll_bar_width = 0
-            if self.editor_widget.verticalScrollBar().isVisible():
-                scroll_bar_width = self.editor_widget.verticalScrollBar().width()
+            if target_editor.verticalScrollBar().isVisible():
+                scroll_bar_width = target_editor.verticalScrollBar().width()
             
             total_width = editor_width + scroll_bar_width
             self.setFixedWidth(total_width)
@@ -3992,6 +4034,54 @@ class BottomCodeCompleter(QtWidgets.QWidget):
             layout = self.layout()
             if layout:
                 layout.setContentsMargins(0, 0, 0, 0)
+    
+    def get_main_window(self):
+        """Get the main window that contains this completer"""
+        current = self.parent()
+        while current:
+            if hasattr(current, 'split_editors') and hasattr(current, 'editors'):
+                return current
+            current = current.parent()
+        return None
+    
+    def calculate_total_split_width(self, main_editor, split_editor, splitter):
+        """Calculate the total width needed for both editors in a horizontal split"""
+        # Find line count widgets for both editors
+        main_line_count = None
+        split_line_count = None
+        
+        # Find line count for main editor
+        current_parent = main_editor.parent()
+        while current_parent and not main_line_count:
+            for child in current_parent.findChildren(LineCountWidget):
+                if hasattr(child, 'editor') and child.editor == main_editor:
+                    main_line_count = child
+                    break
+            current_parent = current_parent.parent()
+        
+        # Find line count for split editor
+        current_parent = split_editor.parent()
+        while current_parent and not split_line_count:
+            for child in current_parent.findChildren(LineCountWidget):
+                if hasattr(child, 'editor') and child.editor == split_editor:
+                    split_line_count = child
+                    break
+            current_parent = current_parent.parent()
+        
+        # Calculate widths
+        main_width = main_line_count.width() + main_editor.width() if main_line_count else main_editor.width()
+        split_width = split_line_count.width() + split_editor.width() if split_line_count else split_editor.width()
+        
+        # Add scroll bar widths if visible
+        if main_editor.verticalScrollBar().isVisible():
+            main_width += main_editor.verticalScrollBar().width()
+        if split_editor.verticalScrollBar().isVisible():
+            split_width += split_editor.verticalScrollBar().width()
+        
+        # Add spacing between the editors (approximate)
+        spacing = 2  # Default spacing in QSplitter
+        
+        return main_width + split_width + spacing
     
     def resizeEvent(self, event):
         """Handle resize events to maintain width matching"""
@@ -4269,6 +4359,13 @@ class BottomCodeCompleter(QtWidgets.QWidget):
         # Update completion data from current editor content
         self.update_completion_data_from_editor(editor)
         
+        # Set the current target editor for completion insertion
+        self.current_target_editor = editor or self.editor_widget
+        
+        # Reposition completer for the target editor if different from current
+        if self.current_target_editor and self.current_target_editor != self.editor_widget:
+            self.set_width_to_match_editor(self.current_target_editor)
+        
         self.current_prefix = prefix.lower()
         self.filtered_items = []
         
@@ -4403,6 +4500,17 @@ class BottomCodeCompleter(QtWidgets.QWidget):
                     self.completion_selected.emit(comp_item['text'])
                     self.hide()
                     break
+    
+    def insert_current_completion(self, completion_text):
+        """Insert completion into the current target editor"""
+        if hasattr(self, 'current_target_editor') and self.current_target_editor:
+            # Find the parent widget that has the insert_completion_for_editor method
+            parent_widget = self.parent()
+            while parent_widget:
+                if hasattr(parent_widget, 'insert_completion_for_editor'):
+                    parent_widget.insert_completion_for_editor(self.current_target_editor, completion_text)
+                    break
+                parent_widget = parent_widget.parent()
     
     def keyPressEvent(self, event):
         """Handle key press events"""
@@ -6048,7 +6156,7 @@ class Pythonico(QtWidgets.QMainWindow):
         self.splitters[tab_index] = editor_splitter
 
         # Connect bottom completer signals
-        bottom_completer.completion_selected.connect(lambda text: self.insert_completion_for_editor(new_editor, text))
+        bottom_completer.completion_selected.connect(self.insert_completion_from_completer)
         new_editor.textChanged.connect(lambda: self.update_bottom_completer_for_editor(new_editor, bottom_completer))
 
         # Store the completer for the new tab
@@ -6228,23 +6336,22 @@ class Pythonico(QtWidgets.QMainWindow):
                 return
                 
             # Skip if we're currently inserting a completion
-            if (hasattr(self, 'bottom_completer') and self.bottom_completer 
-                and getattr(self.bottom_completer, 'inserting_completion', False)):
+            completer = self.completers.get(tab_index) if tab_index is not None else self.bottom_completer
+            if completer and getattr(completer, 'inserting_completion', False):
                 return
                 
             # Only update if this split editor has focus and completer exists
-            if (split_editor.hasFocus() and hasattr(self, 'bottom_completer') 
-                and self.bottom_completer):
+            if split_editor.hasFocus() and completer:
                 cursor = split_editor.textCursor()
                 cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
                 word = cursor.selectedText()
                 
                 # Show completions if word has at least 1 character and is alphanumeric
                 if len(word) >= 1 and word.isalnum():
-                    if not self.bottom_completer.show_completions(word, split_editor):
-                        self.bottom_completer.hide()
+                    if not completer.show_completions(word, split_editor):
+                        completer.hide()
                 else:
-                    self.bottom_completer.hide()
+                    completer.hide()
         except Exception as e:
             # Silently handle any widget-related errors
             pass
@@ -6284,22 +6391,55 @@ class Pythonico(QtWidgets.QMainWindow):
             # Reset flag after a short delay to allow text change events to process
             QtCore.QTimer.singleShot(100, lambda: setattr(self.bottom_completer, 'inserting_completion', False))
     
+    def insert_completion_from_completer(self, completion_text):
+        """Insert completion into the completer's current target editor"""
+        target_editor = None
+        if hasattr(self, 'bottom_completer') and self.bottom_completer:
+            target_editor = self.bottom_completer.current_target_editor
+        
+        # Fallback to current editor if no target set
+        if not target_editor:
+            current_index = self.tab_widget.currentIndex()
+            if current_index >= 0:
+                target_editor = self.editors.get(current_index)
+                # Check if there's a split editor with focus
+                if current_index in self.split_editors:
+                    split_editor = self.split_editors[current_index]
+                    if split_editor.hasFocus():
+                        target_editor = split_editor
+        
+        if target_editor:
+            self.insert_completion_for_editor(target_editor, completion_text)
+    
     def insert_completion_for_editor(self, editor, completion_text):
         """Insert completion into a specific editor"""
-        cursor = editor.textCursor()
-        cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
-        selected_text = cursor.selectedText()
+        # Set flag to prevent recursive completions
+        if hasattr(self, 'bottom_completer') and self.bottom_completer:
+            self.bottom_completer.inserting_completion = True
         
-        # If the completion text is the same as selected text, just position cursor at end
-        if completion_text == selected_text:
-            # Move cursor to end of the word and clear selection
-            cursor.clearSelection()
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfWord)
-            editor.setTextCursor(cursor)
-        else:
-            # Replace the selected text with completion
-            cursor.insertText(completion_text)
-            editor.setTextCursor(cursor)
+        try:
+            cursor = editor.textCursor()
+            cursor.select(QtGui.QTextCursor.SelectionType.WordUnderCursor)
+            selected_text = cursor.selectedText()
+            
+            # If the completion text is the same as selected text, just position cursor at end
+            if completion_text == selected_text:
+                # Move cursor to end of the word and clear selection
+                cursor.clearSelection()
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfWord)
+                editor.setTextCursor(cursor)
+            else:
+                # Replace the selected text with completion
+                cursor.insertText(completion_text)
+                editor.setTextCursor(cursor)
+            
+            # Hide the completer after insertion
+            if hasattr(self, 'bottom_completer') and self.bottom_completer:
+                self.bottom_completer.hide()
+        finally:
+            # Reset flag
+            if hasattr(self, 'bottom_completer') and self.bottom_completer:
+                self.bottom_completer.inserting_completion = False
     
     def keyPressEvent(self, event):
         """Handle key press events for completer navigation"""
