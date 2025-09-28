@@ -5,7 +5,7 @@ a = Analysis(
     ['pythonico.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('icon/main.png', 'icon')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
