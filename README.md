@@ -4,7 +4,7 @@
 </div>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/machaddr/pythonico/main/icons/main.png" alt="Pythonico Logo" width="200">
+  <img src="https://raw.githubusercontent.com/machaddr/pythonico/main/icon/icon.png" alt="Pythonico Logo" width="200">
 </p>
 
 <div align="center">

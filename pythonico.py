@@ -42,7 +42,7 @@ class SettingsManager:
                 "font_size": 11,
                 "theme": "Solarized Light",
                 "api_key": "YOUR-CLAUDE-API",
-                "model": "claude-3-7-sonnet-20250219",
+                "model": "claude-sonnet-4-5-20250929",
                 "temperature": 0.7,
                 "max_tokens": 4096,
                 "default_language": "English (en-US)",
@@ -321,7 +321,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Model
         self.model = QtWidgets.QComboBox()
-        self.model.addItems(["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"])
+        self.model.addItems(["claude-sonnet-4-5-20250929"])
         self.model.setCurrentText(self.temp_settings["assistant"]["model"])
         layout.addRow("Model:", self.model)
         
@@ -662,12 +662,9 @@ class ClaudeAIWidget(QtWidgets.QWidget):
         self.output_window.setReadOnly(True)        
         self.layout.addWidget(self.output_window)
 
-        # Input field and send button layout
-        input_layout = QtWidgets.QHBoxLayout()
+        # Controls row (language selector and mic button)
+        controls_layout = QtWidgets.QHBoxLayout()
 
-        self.input_field = QtWidgets.QLineEdit(self)
-        input_layout.addWidget(self.input_field)
-        
         # Add language selector for speech recognition
         self.language_selector = QtWidgets.QComboBox(self)
         self.language_selector.addItems([
@@ -691,23 +688,29 @@ class ClaudeAIWidget(QtWidgets.QWidget):
             "Ukrainian (uk-UA)"
         ])
         self.language_selector.setToolTip("Select Speech Recognition Language")
-        self.language_selector.setMaximumWidth(120)
-        input_layout.addWidget(self.language_selector)
+        self.language_selector.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        controls_layout.addWidget(self.language_selector)
         
         # Add a microphone button to trigger voice input
         self.microphone_button = QtWidgets.QPushButton("Mic", self)
         self.microphone_button.setToolTip("Start/Stop Voice Input")
         self.microphone_button.clicked.connect(self.toggle_voice_input)
         self.is_listening = False  # Flag to track voice input state
-        input_layout.addWidget(self.microphone_button)
+        self.microphone_button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        controls_layout.addWidget(self.microphone_button)
         
-        # Add a send button to send the input
+        # Add controls row to main layout
+        self.layout.addLayout(controls_layout)
+
+        # Input field with inline send button for extra writing space
+        input_row = QtWidgets.QHBoxLayout()
+        self.input_field = QtWidgets.QLineEdit(self)
+        input_row.addWidget(self.input_field)
         self.send_button = QtWidgets.QPushButton("Send", self)
         self.send_button.setToolTip("Send the input to Claude")
         self.send_button.clicked.connect(self.send_request)
-        input_layout.addWidget(self.send_button)
-
-        self.layout.addLayout(input_layout)
+        input_row.addWidget(self.send_button)
+        self.layout.addLayout(input_row)
         
         # Add a loading spinner while getting the response from Claude
         self.loading_spinner = QtWidgets.QProgressBar(self)

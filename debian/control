@@ -17,7 +17,8 @@ Homepage: https://github.com/machaddr/pythonico
 X-Python3-Version: >= 3.8
 
 Package: pythonico
-Architecture: amd64
+Architecture: amd64 arm64
+Version: 1.0
 Depends: ${misc:Depends}
 Description: A lightweight Python IDE for modern development (static build)
  Pythonico is a modern Python IDE built with PyQt6 that provides:
