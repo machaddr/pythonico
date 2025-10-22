@@ -5668,7 +5668,13 @@ class Pythonico(QtWidgets.QMainWindow):
         # Set proper initial size for project explorer
         self.project_explorer.setMinimumWidth(200)
         self.project_explorer.setMaximumWidth(400)
-        self.project_explorer.resize(250, 600)
+        self.project_explorer.resize(200, 400)
+        
+        # Prevent the dock widget from being resizable
+        self.project_explorer.setFeatures(
+            QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetClosable | 
+            QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetMovable
+        )
 
         # Create an Advanced Python Syntax Highlighter with Tokyo Night theme
         # with the text editor's document
