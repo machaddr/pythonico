@@ -5,7 +5,11 @@ a = Analysis(
     ['pythonico.py'],
     pathex=[],
     binaries=[],
+<<<<<<< HEAD
     datas=[('icon/icon.png', 'icon'), ('icon/icon.ico', 'icon')],
+=======
+    datas=[('icons/main.png', 'icons')],
+>>>>>>> 3691776 (Fix icon path in PyInstaller spec for correct resource inclusion)
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
