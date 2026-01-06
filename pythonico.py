@@ -968,19 +968,17 @@ class LineCountWidget(QtWidgets.QWidget):
         super().__init__()
         self.editor = editor
         self.breakpoints = set()
+        self._theme_signature = None
+        self._gutter_background = QtGui.QColor("#f8f8f8")
+        self._border_color = QtGui.QColor("#d0d0d0")
+        self._text_muted_color = QtGui.QColor("#666666")
+        self._current_line_color = QtGui.QColor("#1976d2")
+        self._breakpoint_color = QtGui.QColor("#d32f2f")
         
         # Set initial properties
         self.setFixedWidth(10)
         self.setMinimumHeight(0)
-        
-        # Configure appearance
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f8f8f8;
-                border: none;
-                border-right: 1px solid #d0d0d0;
-            }
-        """)
+        self.sync_theme_with_editor()
         
         # Connect to editor signals for perfect synchronization
         self.editor.blockCountChanged.connect(self.update_line_numbers)
@@ -998,6 +996,76 @@ class LineCountWidget(QtWidgets.QWidget):
         
         # Initialize
         QtCore.QTimer.singleShot(0, self.update_line_numbers)
+
+    def _extract_style_color(self, style_sheet, property_name):
+        if not style_sheet:
+            return None
+        if property_name == "color":
+            pattern = r"(?:^|[;\s])color\s*:\s*([^;]+);"
+        else:
+            pattern = rf"{re.escape(property_name)}\s*:\s*([^;]+);"
+        match = re.search(pattern, style_sheet, flags=re.IGNORECASE)
+        if not match:
+            return None
+        color = QtGui.QColor(match.group(1).strip())
+        return color if color.isValid() else None
+
+    def _scale_color(self, color, factor):
+        r = min(255, max(0, int(color.red() * factor)))
+        g = min(255, max(0, int(color.green() * factor)))
+        b = min(255, max(0, int(color.blue() * factor)))
+        return QtGui.QColor(r, g, b)
+
+    def _mix_colors(self, foreground, background, alpha):
+        r = int(foreground.red() * alpha + background.red() * (1 - alpha))
+        g = int(foreground.green() * alpha + background.green() * (1 - alpha))
+        b = int(foreground.blue() * alpha + background.blue() * (1 - alpha))
+        return QtGui.QColor(r, g, b)
+
+    def _color_brightness(self, color):
+        return (color.red() * 299 + color.green() * 587 + color.blue() * 114) / 1000
+
+    def sync_theme_with_editor(self):
+        editor_style = self.editor.styleSheet()
+        background_color = self._extract_style_color(editor_style, "background-color")
+        text_color = self._extract_style_color(editor_style, "color")
+
+        if not background_color or not background_color.isValid():
+            background_color = self.editor.palette().color(QtGui.QPalette.ColorRole.Base)
+        if not text_color or not text_color.isValid():
+            text_color = self.editor.palette().color(QtGui.QPalette.ColorRole.Text)
+
+        signature = (background_color.rgba(), text_color.rgba())
+        if signature == self._theme_signature:
+            return
+        self._theme_signature = signature
+
+        brightness = self._color_brightness(background_color)
+        if brightness > 127:
+            gutter_background = self._scale_color(background_color, 0.94)
+            border_color = self._scale_color(background_color, 0.84)
+            muted_text = self._mix_colors(text_color, background_color, 0.65)
+            breakpoint_color = QtGui.QColor("#d32f2f")
+        else:
+            gutter_background = self._scale_color(background_color, 1.08)
+            border_color = self._scale_color(background_color, 1.2)
+            muted_text = self._mix_colors(text_color, background_color, 0.75)
+            breakpoint_color = QtGui.QColor("#ff6b6b")
+
+        self._gutter_background = gutter_background
+        self._border_color = border_color
+        self._text_muted_color = muted_text
+        self._current_line_color = text_color
+        self._breakpoint_color = breakpoint_color
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {gutter_background.name()};
+                border: none;
+                border-right: 1px solid {border_color.name()};
+            }}
+        """)
+        self.update()
     
     def update_line_numbers(self):
         """Update line numbers and trigger repaint"""
@@ -1032,7 +1100,7 @@ class LineCountWidget(QtWidgets.QWidget):
     def paintEvent(self, event):
         """Custom paint event for perfect line number alignment"""
         painter = QtGui.QPainter(self)
-        painter.fillRect(event.rect(), QtGui.QColor("#f8f8f8"))
+        painter.fillRect(event.rect(), self._gutter_background)
         
         # Set font to match editor EXACTLY - same family, size, and style
         editor_font = self.editor.font()
@@ -1075,11 +1143,11 @@ class LineCountWidget(QtWidgets.QWidget):
             
             # Choose color based on line state (no prefix symbols)
             if display_line in self.breakpoints:
-                painter.setPen(QtGui.QColor("#d32f2f"))  # Red for breakpoints
+                painter.setPen(self._breakpoint_color)  # Red for breakpoints
             elif block_number == current_line:
-                painter.setPen(QtGui.QColor("#1976d2"))  # Blue for current line
+                painter.setPen(self._current_line_color)  # Blue for current line
             else:
-                painter.setPen(QtGui.QColor("#666666"))  # Gray for normal lines
+                painter.setPen(self._text_muted_color)  # Muted for normal lines
             
             # Format line number without any prefix symbols
             text = f"{display_line}"
@@ -1103,7 +1171,7 @@ class LineCountWidget(QtWidgets.QWidget):
                 break
         
         # Draw right border
-        painter.setPen(QtGui.QColor("#d0d0d0"))
+        painter.setPen(self._border_color)
         painter.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
     
     def mousePressEvent(self, event):
@@ -1163,11 +1231,12 @@ class LineCountWidget(QtWidgets.QWidget):
         return super().eventFilter(obj, event)
     
     def sync_font_with_editor(self):
-        """Continuously synchronize font with editor"""
+        """Continuously synchronize font and theme with editor"""
         editor_font = self.editor.font()
         if self.font() != editor_font:
             self.setFont(editor_font)
             self.update_line_numbers()
+        self.sync_theme_with_editor()
     
     def sizeHint(self):
         """Provide size hint for layout"""
